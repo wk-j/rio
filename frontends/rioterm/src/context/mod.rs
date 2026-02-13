@@ -456,6 +456,22 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
         // it means we need to clean the context with the specified route_id.
         // If there's no context then should return true and kill the window.
         if !self.contexts.is_empty() {
+            // Check if the exiting route belongs to a quick terminal
+            for grid in self.contexts.iter_mut() {
+                if let Some(ref qt) = grid.quick_terminal {
+                    if qt.item.val.route_id == route_id {
+                        // The quick terminal's shell exited — just dismiss it
+                        let saved_focus = qt.saved_focus;
+                        grid.current = saved_focus;
+                        grid.restore_main_panes();
+                        grid.quick_terminal = None;
+                        self.current_route =
+                            self.contexts[self.current_index].current().route_id;
+                        return false;
+                    }
+                }
+            }
+
             // In case Grid has more than one item
             if self.current_grid().len() > 1 {
                 if self.current().route_id == route_id {
