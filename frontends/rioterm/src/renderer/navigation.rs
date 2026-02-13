@@ -1,7 +1,7 @@
 use crate::constants::*;
 use crate::context::title::ContextTitle;
 use rio_backend::config::colors::Colors;
-use rio_backend::config::navigation::{Navigation, NavigationMode};
+use rio_backend::config::navigation::{hsl_to_rgba, Navigation, NavigationMode};
 use rio_backend::sugarloaf::{FragmentStyle, Object, Quad, RichText, Sugarloaf};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
@@ -108,16 +108,34 @@ impl ScreenNavigation {
         }
 
         let (width, _, scale) = dimensions;
+        let style = &self.navigation.bookmark_style;
 
-        let mut initial_position = (width / scale) - PADDING_X_COLLAPSED_TABS;
-        let position_modifier = 20.;
+        let mut initial_position = (width / scale) - style.padding_x;
+        let position_modifier = style.spacing;
+        let radius = style.border_radius;
+
         for i in (0..len).rev() {
-            let mut color = colors.tabs;
-            let mut size = INACTIVE_TAB_WIDTH_SIZE;
-            if i == current {
-                color = colors.tabs_active_highlight;
-                size = ACTIVE_TAB_WIDTH_SIZE;
-            }
+            let is_active = i == current;
+
+            let mut color = if style.hue_rotation {
+                let hue = style.base_hue + (i as f32) * style.hue_step;
+                let lightness = if is_active {
+                    style.lightness_active
+                } else {
+                    style.lightness_inactive
+                };
+                hsl_to_rgba(hue, style.saturation, lightness, 1.0)
+            } else if is_active {
+                colors.tabs_active_highlight
+            } else {
+                colors.tabs
+            };
+
+            let height = if is_active {
+                style.height_active
+            } else {
+                style.height_inactive
+            };
 
             if let Some(title) = titles.get(&i) {
                 if !self.color_automation.is_empty() {
@@ -136,8 +154,17 @@ impl ScreenNavigation {
             let renderable = Quad {
                 position: [initial_position, 0.0],
                 color,
-                size: [15.0, size],
-                ..Quad::default()
+                size: [style.width, height],
+                border_radius: [radius, radius, radius, radius],
+                border_width: style.border_width,
+                border_color: style.border_color,
+                shadow_color: if style.shadow_blur_radius > 0.0 {
+                    style.shadow_color
+                } else {
+                    [0.0, 0.0, 0.0, 0.0]
+                },
+                shadow_offset: style.shadow_offset,
+                shadow_blur_radius: style.shadow_blur_radius,
             };
             initial_position -= position_modifier;
             objects.push(Object::Quad(renderable));
