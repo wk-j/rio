@@ -461,9 +461,9 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                 if let Some(ref qt) = grid.quick_terminal {
                     if qt.item.val.route_id == route_id {
                         // The quick terminal's shell exited — just dismiss it
+                        // No dimension restore needed (QT is an overlay)
                         let saved_focus = qt.saved_focus;
                         grid.current = saved_focus;
-                        grid.restore_main_panes();
                         grid.quick_terminal = None;
                         self.current_route =
                             self.contexts[self.current_index].current().route_id;
@@ -539,7 +539,8 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     }
 
     /// Dismiss the quick terminal on the current tab if visible.
-    /// Restores focus to the previously focused pane and resizes main panes back.
+    /// Restores focus to the previously focused pane. No dimension changes needed
+    /// since the QT is an overlay and main panes were never resized.
     #[inline]
     pub fn dismiss_quick_terminal(&mut self) {
         let grid = &mut self.contexts[self.current_index];
@@ -547,7 +548,6 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
             if qt.visible {
                 qt.visible = false;
                 grid.current = qt.saved_focus;
-                grid.restore_main_panes();
             }
         }
         self.current_route = self.contexts[self.current_index].current().route_id;
@@ -701,8 +701,12 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     }
 
     #[inline]
-    pub fn extend_with_grid_objects(&self, target: &mut Vec<Object>) {
-        self.contexts[self.current_index].extend_with_objects(target);
+    pub fn extend_with_grid_objects(
+        &self,
+        target: &mut Vec<Object>,
+        background_color: [f32; 4],
+    ) {
+        self.contexts[self.current_index].extend_with_objects(target, background_color);
     }
 
     #[inline]
@@ -935,6 +939,11 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
         if working_dir.is_some() {
             cloned_config.working_dir = working_dir;
         }
+        // Force spawn (not fork) so working_dir is respected
+        #[cfg(not(target_os = "windows"))]
+        {
+            cloned_config.use_fork = false;
+        }
 
         let current = self.current();
         let cursor = current.cursor_from_ref();
@@ -995,7 +1004,21 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
 
             let current = grid.current();
             let cursor = current.cursor_from_ref();
-            let dimension = current.dimension;
+            let current_dim = current.dimension;
+
+            // Build dimension with the quick terminal's actual height
+            // so the PTY is spawned with correct rows from the start
+            let qt_height = grid.height * 0.4; // QUICK_TERMINAL_HEIGHT_RATIO
+            let scale = current_dim.dimension.scale;
+            let margin_x = grid.margin.x * scale;
+            let qt_width = grid.width - margin_x;
+            let dimension = ContextDimension::build(
+                qt_width,
+                qt_height,
+                current_dim.dimension,
+                current_dim.line_height,
+                grid.margin,
+            );
 
             match ContextManager::create_context(
                 (&cursor, current.renderable_content.has_blinking_enabled),

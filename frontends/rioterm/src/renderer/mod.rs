@@ -1186,7 +1186,8 @@ impl Renderer {
         }
 
         // let _duration = start.elapsed();
-        context_manager.extend_with_grid_objects(&mut objects);
+        context_manager
+            .extend_with_grid_objects(&mut objects, self.named_colors.background.0);
         // let _duration = start.elapsed();
 
         // Update visual bell state and set overlay if needed
