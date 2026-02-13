@@ -263,6 +263,7 @@ impl From<String> for Action {
             "movedividerleft" => Some(Action::MoveDividerLeft),
             "movedividerright" => Some(Action::MoveDividerRight),
             "togglezoom" => Some(Action::ToggleZoom),
+            "togglequickterminal" => Some(Action::ToggleQuickTerminal),
             "togglevimode" => Some(Action::ToggleViMode),
             "togglefullscreen" => Some(Action::ToggleFullscreen),
             "none" => Some(Action::None),
@@ -500,6 +501,9 @@ pub enum Action {
 
     /// Toggle zoom on current split (fullscreen pane)
     ToggleZoom,
+
+    /// Toggle quick terminal (drop-down terminal at bottom, inherits CWD)
+    ToggleQuickTerminal,
 
     /// Allow receiving char input.
     ReceiveChar,

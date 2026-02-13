@@ -1089,6 +1089,74 @@ impl Renderer {
             }
         }
 
+        // Render quick terminal content if visible
+        if let Some(ref mut qt) = grid.quick_terminal {
+            if qt.visible {
+                let is_active = qt.item.val.route_id == active_key;
+                let context = qt.item.context_mut();
+
+                let mut has_ime = false;
+                if let Some(preedit) = context.ime.preedit() {
+                    if let Some(content) = preedit.text.chars().next() {
+                        context.renderable_content.cursor.content = content;
+                        context.renderable_content.cursor.is_ime_enabled = true;
+                        has_ime = true;
+                    }
+                }
+                if !has_ime {
+                    context.renderable_content.cursor.is_ime_enabled = false;
+                    context.renderable_content.cursor.content =
+                        context.renderable_content.cursor.content_ref;
+                }
+
+                context.renderable_content.pending_update.reset();
+
+                let terminal_snapshot = {
+                    let mut terminal = context.terminal.lock();
+                    let snapshot = TerminalSnapshot {
+                        colors: terminal.colors,
+                        display_offset: terminal.display_offset(),
+                        blinking_cursor: terminal.blinking_cursor,
+                        visible_rows: terminal.visible_rows(),
+                        cursor: terminal.cursor(),
+                        damage: TerminalDamage::Full,
+                        columns: terminal.columns(),
+                        screen_lines: terminal.screen_lines(),
+                    };
+                    terminal.reset_damage();
+                    drop(terminal);
+                    snapshot
+                };
+
+                context.renderable_content.cursor.state = terminal_snapshot.cursor;
+
+                let rich_text_id = context.rich_text_id;
+                let is_cursor_visible =
+                    context.renderable_content.cursor.state.is_visible();
+
+                let content = sugarloaf.content();
+                content.sel(rich_text_id);
+                content.clear();
+                for (i, row) in terminal_snapshot.visible_rows.iter().enumerate() {
+                    let has_cursor = is_cursor_visible
+                        && context.renderable_content.cursor.state.pos.row == i;
+                    self.create_line(
+                        content,
+                        row,
+                        has_cursor,
+                        None,
+                        Line((i as i32) - terminal_snapshot.display_offset as i32),
+                        &context.renderable_content,
+                        None,  // no hint matches for quick terminal
+                        &None, // no focused match
+                        &terminal_snapshot.colors,
+                        is_active,
+                    );
+                }
+                content.build();
+            }
+        }
+
         self.update_search_rich_text(sugarloaf.content());
 
         let window_size = sugarloaf.window_size();

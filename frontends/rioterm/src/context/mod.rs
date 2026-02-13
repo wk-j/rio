@@ -522,6 +522,21 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
         }
     }
 
+    /// Dismiss the quick terminal on the current tab if visible.
+    /// Restores focus to the previously focused pane and resizes main panes back.
+    #[inline]
+    pub fn dismiss_quick_terminal(&mut self) {
+        let grid = &mut self.contexts[self.current_index];
+        if let Some(ref mut qt) = grid.quick_terminal {
+            if qt.visible {
+                qt.visible = false;
+                grid.current = qt.saved_focus;
+                grid.restore_main_panes();
+            }
+        }
+        self.current_route = self.contexts[self.current_index].current().route_id;
+    }
+
     #[inline]
     pub fn create_new_window(&self) {
         self.event_proxy
@@ -614,6 +629,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
             return;
         }
 
+        self.dismiss_quick_terminal();
         self.set_current(tab_index);
     }
 
@@ -730,6 +746,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
 
     #[inline]
     pub fn remove_current_grid(&mut self) {
+        self.dismiss_quick_terminal();
         self.contexts[self.current_index].remove_current();
         self.current_route = self.contexts[self.current_index].current().route_id;
     }
@@ -759,6 +776,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
 
     #[inline]
     pub fn close_current_context(&mut self) {
+        self.dismiss_quick_terminal();
         if self.contexts.len() == 1 {
             // MacOS: Close last tab will work, leading to hide and
             // keep Rio running in background.
@@ -814,6 +832,8 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
             return;
         }
 
+        self.dismiss_quick_terminal();
+
         if self.contexts.len() - 1 == self.current_index {
             self.current_index = 0;
         } else {
@@ -830,6 +850,8 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                 .send_event(RioEvent::SelectNativeTabPrev, self.window_id);
             return;
         }
+
+        self.dismiss_quick_terminal();
 
         if self.current_index == 0 {
             self.current_index = self.contexts.len() - 1;
@@ -867,6 +889,9 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     }
 
     pub fn split(&mut self, rich_text_id: usize, split_down: bool) {
+        // Dismiss quick terminal before splitting
+        self.dismiss_quick_terminal();
+
         let mut working_dir = self.config.working_dir.clone();
         if self.config.cwd {
             #[cfg(not(target_os = "windows"))]
@@ -919,6 +944,62 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
             Err(..) => {
                 tracing::error!("not able to create a new context");
             }
+        }
+    }
+
+    pub fn toggle_quick_terminal(&mut self, rich_text_id: usize) {
+        let grid = &mut self.contexts[self.current_index];
+        let needs_creation = grid.toggle_quick_terminal();
+
+        if needs_creation {
+            // Get CWD from current pane
+            let mut working_dir = self.config.working_dir.clone();
+            if self.config.cwd {
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let current_context = grid.current();
+                    if let Ok(path) = teletypewriter::foreground_process_path(
+                        *current_context.main_fd,
+                        current_context.shell_pid,
+                    ) {
+                        working_dir = Some(path.to_string_lossy().to_string());
+                    }
+                }
+
+                #[cfg(target_os = "windows")]
+                {
+                    working_dir = None;
+                }
+            }
+
+            let mut cloned_config = self.config.clone();
+            if working_dir.is_some() {
+                cloned_config.working_dir = working_dir;
+            }
+
+            let current = grid.current();
+            let cursor = current.cursor_from_ref();
+            let dimension = current.dimension;
+
+            match ContextManager::create_context(
+                (&cursor, current.renderable_content.has_blinking_enabled),
+                self.event_proxy.clone(),
+                self.window_id,
+                rich_text_id,
+                dimension,
+                &cloned_config,
+            ) {
+                Ok(new_context) => {
+                    let new_route_id = new_context.route_id;
+                    grid.open_quick_terminal(new_context);
+                    self.current_route = new_route_id;
+                }
+                Err(..) => {
+                    tracing::error!("not able to create quick terminal context");
+                }
+            }
+        } else {
+            self.current_route = grid.current().route_id;
         }
     }
 
@@ -980,6 +1061,8 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
 
     #[inline]
     pub fn add_context(&mut self, redirect: bool, rich_text_id: usize) {
+        // Dismiss quick terminal before creating a new tab
+        self.dismiss_quick_terminal();
         let mut working_dir = self.config.working_dir.clone();
         if self.config.cwd {
             #[cfg(not(target_os = "windows"))]

@@ -77,6 +77,21 @@ pub struct Delta<T: Default> {
     pub bottom_y: T,
 }
 
+/// Ratio of height used by the quick terminal (0.0-1.0)
+const QUICK_TERMINAL_HEIGHT_RATIO: f32 = 0.4;
+
+/// State for the quick terminal drop-down pane.
+pub struct QuickTerminalState<T: EventListener> {
+    /// The quick terminal's context item (outside the normal split tree)
+    pub item: ContextGridItem<T>,
+    /// Whether the quick terminal is currently visible
+    pub visible: bool,
+    /// The key of the pane that was focused before the quick terminal was shown
+    pub saved_focus: usize,
+    /// Saved original dimensions of all main panes (keyed by route_id) for exact restoration
+    saved_dimensions: HashMap<usize, (f32, f32)>,
+}
+
 pub struct ContextGrid<T: EventListener> {
     pub width: f32,
     pub height: f32,
@@ -89,6 +104,8 @@ pub struct ContextGrid<T: EventListener> {
     /// When Some(key), the split with that key is zoomed to fill the entire grid.
     /// All other splits remain alive but are not rendered.
     pub zoomed_key: Option<usize>,
+    /// Quick terminal state (drop-down terminal at bottom)
+    pub quick_terminal: Option<QuickTerminalState<T>>,
 }
 
 pub struct ContextGridItem<T: EventListener> {
@@ -165,6 +182,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             scaled_padding,
             root: Some(root_key),
             zoomed_key: None,
+            quick_terminal: None,
         };
         grid.calculate_positions_for_affected_nodes(&[root_key]);
         grid
@@ -246,6 +264,210 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 item.set_position([self.margin.x, self.margin.top_y]);
             }
         }
+    }
+
+    /// Returns true if the quick terminal is currently visible.
+    #[inline]
+    pub fn is_quick_terminal_visible(&self) -> bool {
+        self.quick_terminal.as_ref().is_some_and(|qt| qt.visible)
+    }
+
+    /// Open the quick terminal with a pre-created context.
+    pub fn open_quick_terminal(&mut self, context: Context<T>) {
+        // Cancel zoom if active
+        self.zoomed_key = None;
+
+        let saved_focus = self.current;
+
+        // Save original dimensions of all main panes for exact restoration
+        let saved_dimensions: HashMap<usize, (f32, f32)> = self
+            .inner
+            .iter()
+            .map(|(k, item)| (*k, (item.val.dimension.width, item.val.dimension.height)))
+            .collect();
+
+        // Calculate dimensions for the quick terminal (bottom portion)
+        let qt_height = self.height * QUICK_TERMINAL_HEIGHT_RATIO;
+        let main_height = self.height - qt_height;
+
+        // Create grid item
+        let mut item = ContextGridItem::new(context);
+
+        // Set dimensions for the quick terminal
+        let scale = item.val.dimension.dimension.scale;
+        let margin_x = self.margin.x * scale;
+        item.val.dimension.update_width(self.width - margin_x);
+        item.val.dimension.update_height(qt_height);
+
+        // Position at bottom
+        let pos_y = main_height / scale;
+        item.set_position([self.margin.x, pos_y]);
+
+        // Resize PTY
+        let mut terminal = item.val.terminal.lock();
+        terminal.resize::<ContextDimension>(item.val.dimension);
+        drop(terminal);
+        let winsize = crate::renderer::utils::terminal_dimensions(&item.val.dimension);
+        let _ = item.val.messenger.send_resize(winsize);
+
+        // Focus the quick terminal
+        self.current = item.val.route_id;
+
+        self.quick_terminal = Some(QuickTerminalState {
+            item,
+            visible: true,
+            saved_focus,
+            saved_dimensions,
+        });
+
+        // Shrink the main grid panes to make room
+        self.shrink_main_panes(main_height);
+    }
+
+    /// Toggle the quick terminal visibility.
+    /// Returns true if the quick terminal needs to be created (caller should provide a context).
+    pub fn toggle_quick_terminal(&mut self) -> bool {
+        if let Some(ref mut qt) = self.quick_terminal {
+            if qt.visible {
+                // Hide: restore exact original dimensions, restore focus
+                qt.visible = false;
+                self.current = qt.saved_focus;
+                self.restore_main_panes();
+            } else {
+                // Show: shrink main panes, focus quick terminal
+                self.zoomed_key = None;
+
+                // Save current dimensions before shrinking
+                qt.saved_dimensions = self
+                    .inner
+                    .iter()
+                    .map(|(k, item)| {
+                        (*k, (item.val.dimension.width, item.val.dimension.height))
+                    })
+                    .collect();
+
+                qt.visible = true;
+                qt.saved_focus = self.current;
+                self.current = qt.item.val.route_id;
+
+                let qt_height = self.height * QUICK_TERMINAL_HEIGHT_RATIO;
+                let main_height = self.height - qt_height;
+
+                // Update quick terminal dimensions and position
+                let scale = qt.item.val.dimension.dimension.scale;
+                let margin_x = self.margin.x * scale;
+                qt.item.val.dimension.update_width(self.width - margin_x);
+                qt.item.val.dimension.update_height(qt_height);
+
+                let pos_y = main_height / scale;
+                qt.item.set_position([self.margin.x, pos_y]);
+
+                // Resize PTY
+                let mut terminal = qt.item.val.terminal.lock();
+                terminal.resize::<ContextDimension>(qt.item.val.dimension);
+                drop(terminal);
+                let winsize =
+                    crate::renderer::utils::terminal_dimensions(&qt.item.val.dimension);
+                let _ = qt.item.val.messenger.send_resize(winsize);
+
+                // Shrink main panes
+                self.shrink_main_panes(main_height);
+            }
+            false
+        } else {
+            // No quick terminal exists, caller needs to create one
+            true
+        }
+    }
+
+    /// Shrink all main panes proportionally to fit within the given height.
+    pub fn shrink_main_panes(&mut self, available_height: f32) {
+        if self.height <= 0.0 {
+            return;
+        }
+        let ratio = available_height / self.height;
+
+        for (_key, context) in self.inner.iter_mut() {
+            let new_height = context.val.dimension.height * ratio;
+            context.val.dimension.update_height(new_height);
+
+            let mut terminal = context.val.terminal.lock();
+            terminal.resize::<ContextDimension>(context.val.dimension);
+            drop(terminal);
+            let winsize =
+                crate::renderer::utils::terminal_dimensions(&context.val.dimension);
+            let _ = context.val.messenger.send_resize(winsize);
+        }
+
+        // Recalculate positions
+        let all_keys: Vec<usize> = self.inner.keys().cloned().collect();
+        self.calculate_positions_for_affected_nodes(&all_keys);
+    }
+
+    /// Restore all main panes to their exact saved dimensions.
+    pub fn restore_main_panes(&mut self) {
+        let saved = match self.quick_terminal {
+            Some(ref qt) => &qt.saved_dimensions,
+            None => return,
+        };
+
+        for (&key, &(width, height)) in saved.iter() {
+            if let Some(context) = self.inner.get_mut(&key) {
+                context.val.dimension.update_width(width);
+                context.val.dimension.update_height(height);
+
+                let mut terminal = context.val.terminal.lock();
+                terminal.resize::<ContextDimension>(context.val.dimension);
+                drop(terminal);
+                let winsize =
+                    crate::renderer::utils::terminal_dimensions(&context.val.dimension);
+                let _ = context.val.messenger.send_resize(winsize);
+            }
+        }
+
+        // Recalculate positions
+        let all_keys: Vec<usize> = self.inner.keys().cloned().collect();
+        self.calculate_positions_for_affected_nodes(&all_keys);
+    }
+
+    /// Resize the quick terminal divider by the given amount (positive = taller, negative = shorter).
+    /// Returns true if the resize was applied.
+    pub fn resize_quick_terminal(&mut self, amount: f32) -> bool {
+        let qt = match self.quick_terminal {
+            Some(ref mut qt) if qt.visible => qt,
+            _ => return false,
+        };
+
+        let scale = qt.item.val.dimension.dimension.scale;
+        let min_height = self.height * 0.1;
+        let max_height = self.height * 0.8;
+        let current_qt_height = qt.item.val.dimension.height;
+        let new_qt_height = (current_qt_height + amount).clamp(min_height, max_height);
+        let actual_delta = new_qt_height - current_qt_height;
+
+        if actual_delta.abs() < 0.1 {
+            return false;
+        }
+
+        // Update quick terminal height
+        qt.item.val.dimension.update_height(new_qt_height);
+
+        // Reposition quick terminal
+        let new_main_height = self.height - new_qt_height;
+        let pos_y = new_main_height / scale;
+        qt.item.set_position([self.margin.x, pos_y]);
+
+        // Resize quick terminal PTY
+        let mut terminal = qt.item.val.terminal.lock();
+        terminal.resize::<ContextDimension>(qt.item.val.dimension);
+        drop(terminal);
+        let winsize = crate::renderer::utils::terminal_dimensions(&qt.item.val.dimension);
+        let _ = qt.item.val.messenger.send_resize(winsize);
+
+        // Shrink main panes to new available height
+        self.shrink_main_panes(new_main_height);
+
+        true
     }
 
     /// Get all keys in the order they appear in the grid (depth-first traversal)
@@ -368,6 +590,13 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
 
     #[inline]
     pub fn current(&self) -> &Context<T> {
+        // Check quick terminal first
+        if let Some(ref qt) = self.quick_terminal {
+            if qt.visible && qt.item.val.route_id == self.current {
+                return &qt.item.val;
+            }
+        }
+
         if let Some(item) = self.inner.get(&self.current) {
             &item.val
         } else {
@@ -386,6 +615,13 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
     #[inline]
     pub fn current_mut(&mut self) -> &mut Context<T> {
         let current_key = self.current;
+
+        // Check quick terminal first
+        if let Some(ref mut qt) = self.quick_terminal {
+            if qt.visible && qt.item.val.route_id == current_key {
+                return &mut qt.item.val;
+            }
+        }
 
         // Check if current key exists, if not try to fix it
         if !self.inner.contains_key(&current_key) {
@@ -439,6 +675,22 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         } else {
             self.plot_objects(target);
         }
+
+        // Add quick terminal pane if visible
+        if let Some(ref qt) = self.quick_terminal {
+            if qt.visible {
+                // Add a separator quad between main area and quick terminal
+                let scale = qt.item.val.dimension.dimension.scale;
+                let qt_pos_y = qt.item.position()[1];
+                target.push(Object::Quad(Quad {
+                    position: [0.0, qt_pos_y - (self.scaled_padding / scale)],
+                    color: self.border_color,
+                    size: [self.width, self.scaled_padding],
+                    ..Quad::default()
+                }));
+                target.push(qt.item.rich_text_object.clone());
+            }
+        }
     }
 
     #[inline]
@@ -467,11 +719,32 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         } else {
             self.plot_objects(&mut objects);
         }
+
+        // Add quick terminal pane if visible
+        if let Some(ref qt) = self.quick_terminal {
+            if qt.visible {
+                objects.push(qt.item.rich_text_object.clone());
+            }
+        }
+
         objects
     }
 
     pub fn current_context_with_computed_dimension(&self) -> (&Context<T>, Delta<f32>) {
         let len = self.inner.len();
+
+        // When quick terminal is focused, return its context and position
+        if let Some(ref qt) = self.quick_terminal {
+            if qt.visible && qt.item.val.route_id == self.current {
+                let pos = qt.item.position();
+                let margin = Delta {
+                    x: pos[0] + self.scaled_padding,
+                    top_y: pos[1] + self.scaled_padding,
+                    bottom_y: self.margin.bottom_y,
+                };
+                return (&qt.item.val, margin);
+            }
+        }
 
         // When zoomed, treat as single-split: return margin directly
         if self.zoomed_key.is_some() {
@@ -677,6 +950,21 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
     pub fn resize(&mut self, new_width: f32, new_height: f32) {
         // Cancel zoom on window resize to avoid dimension conflicts
         self.zoomed_key = None;
+
+        // If quick terminal is visible, dismiss it on resize and restore panes first
+        if let Some(ref mut qt) = self.quick_terminal {
+            if qt.visible {
+                qt.visible = false;
+                self.current = qt.saved_focus;
+                // Restore panes to saved dimensions before the standard resize
+                for (&key, &(width, height)) in qt.saved_dimensions.iter() {
+                    if let Some(context) = self.inner.get_mut(&key) {
+                        context.val.dimension.update_width(width);
+                        context.val.dimension.update_height(height);
+                    }
+                }
+            }
+        }
 
         let width_difference = new_width - self.width;
         let height_difference = new_height - self.height;

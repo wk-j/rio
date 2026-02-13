@@ -957,12 +957,28 @@ impl Screen<'_> {
                         self.split_down();
                     }
                     Act::MoveDividerUp => {
-                        // User wants divider to move up visually, which means expanding the bottom split
-                        self.move_divider_down();
+                        let grid = self.context_manager.current_grid_mut();
+                        if grid.is_quick_terminal_visible() {
+                            // Move divider up = quick terminal gets taller
+                            if grid.resize_quick_terminal(20.0) {
+                                self.render();
+                            }
+                        } else {
+                            // User wants divider to move up visually, which means expanding the bottom split
+                            self.move_divider_down();
+                        }
                     }
                     Act::MoveDividerDown => {
-                        // User wants divider to move down visually, which means expanding the top split
-                        self.move_divider_up();
+                        let grid = self.context_manager.current_grid_mut();
+                        if grid.is_quick_terminal_visible() {
+                            // Move divider down = quick terminal gets shorter
+                            if grid.resize_quick_terminal(-20.0) {
+                                self.render();
+                            }
+                        } else {
+                            // User wants divider to move down visually, which means expanding the top split
+                            self.move_divider_up();
+                        }
                     }
                     Act::MoveDividerLeft => {
                         self.move_divider_left();
@@ -972,6 +988,11 @@ impl Screen<'_> {
                     }
                     Act::ToggleZoom => {
                         self.context_manager.current_grid_mut().toggle_zoom();
+                        self.render();
+                    }
+                    Act::ToggleQuickTerminal => {
+                        let rich_text_id = self.sugarloaf.create_rich_text();
+                        self.context_manager.toggle_quick_terminal(rich_text_id);
                         self.render();
                     }
                     Act::ConfigEditor => {
