@@ -78,7 +78,7 @@ pub struct Delta<T: Default> {
 }
 
 /// Ratio of height used by the quick terminal (0.0-1.0)
-const QUICK_TERMINAL_HEIGHT_RATIO: f32 = 0.4;
+pub const QUICK_TERMINAL_HEIGHT_RATIO: f32 = 1.0;
 
 /// State for the quick terminal overlay pane.
 /// The quick terminal is rendered as an overlay on top of main panes —

@@ -1008,7 +1008,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
 
             // Build dimension with the quick terminal's actual height
             // so the PTY is spawned with correct rows from the start
-            let qt_height = grid.height * 0.4; // QUICK_TERMINAL_HEIGHT_RATIO
+            let qt_height = grid.height * grid::QUICK_TERMINAL_HEIGHT_RATIO;
             let scale = current_dim.dimension.scale;
             let margin_x = grid.margin.x * scale;
             let qt_width = grid.width - margin_x;
