@@ -970,6 +970,10 @@ impl Screen<'_> {
                     Act::MoveDividerRight => {
                         self.move_divider_right();
                     }
+                    Act::ToggleZoom => {
+                        self.context_manager.current_grid_mut().toggle_zoom();
+                        self.render();
+                    }
                     Act::ConfigEditor => {
                         self.context_manager.switch_to_settings();
                     }

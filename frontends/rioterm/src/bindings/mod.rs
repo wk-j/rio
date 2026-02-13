@@ -262,6 +262,7 @@ impl From<String> for Action {
             "movedividerdown" => Some(Action::MoveDividerDown),
             "movedividerleft" => Some(Action::MoveDividerLeft),
             "movedividerright" => Some(Action::MoveDividerRight),
+            "togglezoom" => Some(Action::ToggleZoom),
             "togglevimode" => Some(Action::ToggleViMode),
             "togglefullscreen" => Some(Action::ToggleFullscreen),
             "none" => Some(Action::None),
@@ -496,6 +497,9 @@ pub enum Action {
 
     /// Move divider right
     MoveDividerRight,
+
+    /// Toggle zoom on current split (fullscreen pane)
+    ToggleZoom,
 
     /// Allow receiving char input.
     ReceiveChar,

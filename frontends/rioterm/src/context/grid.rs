@@ -86,6 +86,9 @@ pub struct ContextGrid<T: EventListener> {
     scaled_padding: f32,
     inner: HashMap<usize, ContextGridItem<T>>,
     pub root: Option<usize>,
+    /// When Some(key), the split with that key is zoomed to fill the entire grid.
+    /// All other splits remain alive but are not rendered.
+    pub zoomed_key: Option<usize>,
 }
 
 pub struct ContextGridItem<T: EventListener> {
@@ -161,6 +164,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             border_color,
             scaled_padding,
             root: Some(root_key),
+            zoomed_key: None,
         };
         grid.calculate_positions_for_affected_nodes(&[root_key]);
         grid
@@ -197,6 +201,51 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
     #[allow(unused)]
     pub fn contexts(&mut self) -> &HashMap<usize, ContextGridItem<T>> {
         &self.inner
+    }
+
+    /// Returns true if a split is currently zoomed to fill the grid.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn is_zoomed(&self) -> bool {
+        self.zoomed_key.is_some()
+    }
+
+    /// Toggle zoom on the current split. When zoomed, the current split
+    /// fills the entire grid area and other splits are hidden (but still alive).
+    /// Calling again restores the original layout.
+    pub fn toggle_zoom(&mut self) {
+        if self.inner.len() <= 1 {
+            return;
+        }
+
+        if self.zoomed_key.is_some() {
+            // Unzoom: restore original dimensions by triggering a full resize
+            self.zoomed_key = None;
+            // Restore dimensions from the tree structure
+            let w = self.width;
+            let h = self.height;
+            self.resize(w, h);
+        } else {
+            // Zoom: temporarily give the current split the full grid dimensions
+            self.zoomed_key = Some(self.current);
+            if let Some(item) = self.inner.get_mut(&self.current) {
+                let scale = item.val.dimension.dimension.scale;
+                let margin_x = self.margin.x * scale;
+                let margin_y = (self.margin.top_y + self.margin.bottom_y) * scale;
+                item.val.dimension.update_width(self.width - margin_x);
+                item.val.dimension.update_height(self.height - margin_y);
+
+                let mut terminal = item.val.terminal.lock();
+                terminal.resize::<ContextDimension>(item.val.dimension);
+                drop(terminal);
+                let winsize =
+                    crate::renderer::utils::terminal_dimensions(&item.val.dimension);
+                let _ = item.val.messenger.send_resize(winsize);
+
+                // Position at the grid margin (like a single-split grid)
+                item.set_position([self.margin.x, self.margin.top_y]);
+            }
+        }
     }
 
     /// Get all keys in the order they appear in the grid (depth-first traversal)
@@ -369,6 +418,14 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             return;
         }
 
+        // When zoomed, only show the zoomed split (no border quads)
+        if let Some(zoomed) = self.zoomed_key {
+            if let Some(item) = self.inner.get(&zoomed) {
+                target.push(item.rich_text_object.clone());
+            }
+            return;
+        }
+
         // Reserve space for more objects
         target.reserve(len);
 
@@ -391,6 +448,13 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             return vec![];
         }
 
+        // When zoomed, only show the zoomed split
+        if let Some(zoomed) = self.zoomed_key {
+            if let Some(item) = self.inner.get(&zoomed) {
+                return vec![item.rich_text_object.clone()];
+            }
+        }
+
         let mut objects = Vec::with_capacity(len);
 
         // In case there's only 1 context then ignore quad
@@ -408,6 +472,14 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
 
     pub fn current_context_with_computed_dimension(&self) -> (&Context<T>, Delta<f32>) {
         let len = self.inner.len();
+
+        // When zoomed, treat as single-split: return margin directly
+        if self.zoomed_key.is_some() {
+            if let Some(item) = self.inner.get(&self.current) {
+                return (&item.val, self.margin);
+            }
+        }
+
         if len <= 1 {
             if let Some(item) = self.inner.get(&self.current) {
                 return (&item.val, self.margin);
@@ -603,6 +675,9 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
     }
 
     pub fn resize(&mut self, new_width: f32, new_height: f32) {
+        // Cancel zoom on window resize to avoid dimension conflicts
+        self.zoomed_key = None;
+
         let width_difference = new_width - self.width;
         let height_difference = new_height - self.height;
         self.width = new_width;
@@ -810,6 +885,9 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
     }
 
     pub fn remove_current(&mut self) {
+        // Cancel zoom before removing to avoid invalid state
+        self.zoomed_key = None;
+
         if self.inner.is_empty() {
             tracing::error!("Attempted to remove from empty grid");
             return;
@@ -1206,6 +1284,9 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
     }
 
     pub fn split_right(&mut self, context: Context<T>) {
+        // Cancel zoom before splitting
+        self.zoomed_key = None;
+
         let current_item = if let Some(item) = self.inner.get(&self.current) {
             item
         } else {
@@ -1279,6 +1360,9 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
     }
 
     pub fn split_down(&mut self, context: Context<T>) {
+        // Cancel zoom before splitting
+        self.zoomed_key = None;
+
         let current_item = if let Some(item) = self.inner.get(&self.current) {
             item
         } else {

@@ -847,6 +847,7 @@ impl Renderer {
 
         let grid = context_manager.current_grid_mut();
         let active_key = grid.current;
+        let zoomed_key = grid.zoomed_key;
         let mut has_active_changed = false;
         if self.last_active != Some(active_key) {
             has_active_changed = true;
@@ -854,6 +855,12 @@ impl Renderer {
         }
 
         for (key, grid_context) in grid.contexts_mut().iter_mut() {
+            // When zoomed, skip rendering all splits except the zoomed one
+            if let Some(zk) = zoomed_key {
+                if *key != zk {
+                    continue;
+                }
+            }
             let is_active = &active_key == key;
             let context = grid_context.context_mut();
 
