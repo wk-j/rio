@@ -263,6 +263,7 @@ impl Renderer {
         focused_match: &Option<RangeInclusive<Pos>>,
         term_colors: &TermColors,
         is_active: bool,
+        force_opaque_bg: bool,
     ) {
         // let start = std::time::Instant::now();
         let cursor = &renderable_content.cursor;
@@ -379,6 +380,14 @@ impl Renderer {
                 if let Some(mut background_color) = style.background_color {
                     background_color[3] = self.unfocused_split_opacity;
                 }
+            }
+
+            // For overlay surfaces (e.g. quick terminal), force every cell to
+            // have an explicit opaque background so nothing shows through.
+            if force_opaque_bg && style.background_color.is_none() {
+                let mut bg = self.named_colors.background.0;
+                bg[3] = 1.0;
+                style.background_color = Some(bg);
             }
 
             if square.flags.contains(Flags::GRAPHICS) {
@@ -854,7 +863,22 @@ impl Renderer {
             self.last_active = Some(active_key);
         }
 
+        let qt_visible = grid.is_quick_terminal_visible();
+
         for (key, grid_context) in grid.contexts_mut().iter_mut() {
+            // When quick terminal is visible, clear and skip main panes —
+            // the QT overlay covers the full window so main pane content is hidden.
+            // We must clear the rich text so stale content from the previous frame
+            // doesn't bleed through.
+            if qt_visible {
+                let rich_text_id = grid_context.context().rich_text_id;
+                let content = sugarloaf.content();
+                content.sel(rich_text_id);
+                content.clear();
+                content.build();
+                continue;
+            }
+
             // When zoomed, skip rendering all splits except the zoomed one
             if let Some(zk) = zoomed_key {
                 if *key != zk {
@@ -1051,6 +1075,7 @@ impl Renderer {
                             focused_match,
                             &terminal_snapshot.colors,
                             is_active,
+                            false,
                         );
                     }
                     content.build();
@@ -1080,6 +1105,7 @@ impl Renderer {
                                 focused_match,
                                 &terminal_snapshot.colors,
                                 is_active,
+                                false,
                             );
                         }
                     }
@@ -1151,6 +1177,7 @@ impl Renderer {
                         &None, // no focused match
                         &terminal_snapshot.colors,
                         is_active,
+                        true, // force opaque bg: QT is overlay, nothing behind it
                     );
                 }
                 content.build();
