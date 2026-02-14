@@ -77,9 +77,6 @@ pub struct Delta<T: Default> {
     pub bottom_y: T,
 }
 
-/// Ratio of height used by the quick terminal (0.0-1.0)
-pub const QUICK_TERMINAL_HEIGHT_RATIO: f32 = 1.0;
-
 /// State for the quick terminal overlay pane.
 /// The quick terminal is rendered as an overlay on top of main panes —
 /// main pane dimensions are never modified.
@@ -280,22 +277,18 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
 
         let saved_focus = self.current;
 
-        // Calculate dimensions for the quick terminal (bottom portion)
-        let qt_height = self.height * QUICK_TERMINAL_HEIGHT_RATIO;
-        let main_height = self.height - qt_height;
-
         // Create grid item
         let mut item = ContextGridItem::new(context);
 
-        // Set dimensions for the quick terminal
+        // Use the same dimensions as a full-size main pane (accounting for margins)
         let scale = item.val.dimension.dimension.scale;
         let margin_x = self.margin.x * scale;
+        let margin_y = (self.margin.top_y + self.margin.bottom_y) * scale;
         item.val.dimension.update_width(self.width - margin_x);
-        item.val.dimension.update_height(qt_height);
+        item.val.dimension.update_height(self.height - margin_y);
 
-        // Position at bottom
-        let pos_y = main_height / scale;
-        item.set_position([self.margin.x, pos_y]);
+        // Position at the same margin as main panes
+        item.set_position([self.margin.x, self.margin.top_y]);
 
         // Resize PTY to match the overlay dimensions
         let mut terminal = item.val.terminal.lock();
@@ -331,17 +324,14 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 qt.saved_focus = self.current;
                 self.current = qt.item.val.route_id;
 
-                let qt_height = self.height * QUICK_TERMINAL_HEIGHT_RATIO;
-                let main_height = self.height - qt_height;
-
-                // Update quick terminal dimensions and position
+                // Update quick terminal dimensions and position (same as main pane)
                 let scale = qt.item.val.dimension.dimension.scale;
                 let margin_x = self.margin.x * scale;
+                let margin_y = (self.margin.top_y + self.margin.bottom_y) * scale;
                 qt.item.val.dimension.update_width(self.width - margin_x);
-                qt.item.val.dimension.update_height(qt_height);
+                qt.item.val.dimension.update_height(self.height - margin_y);
 
-                let pos_y = main_height / scale;
-                qt.item.set_position([self.margin.x, pos_y]);
+                qt.item.set_position([self.margin.x, self.margin.top_y]);
 
                 // Resize QT's own PTY
                 let mut terminal = qt.item.val.terminal.lock();
