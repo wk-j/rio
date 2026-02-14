@@ -76,8 +76,8 @@ This feature is **keyboard-centric**. Since unfocused windows are mostly off-scr
 
 | Action | Default Keybinding (macOS) | Default (Linux/Windows) |
 |---|---|---|
-| Cycle to next window | `Cmd+`` ` | `Alt+`` ` |
-| Cycle to previous window | `Cmd+Shift+`` ` | `Alt+Shift+`` ` |
+| Cycle to next window | `Cmd+Shift+>` | `Alt+Shift+>` |
+| Cycle to previous window | `Cmd+Shift+<` | `Alt+Shift+<` |
 | Focus window by number | `Cmd+Ctrl+1/2/3/...` | `Alt+Ctrl+1/2/3/...` |
 | Re-align all windows | `Cmd+Shift+R` | `Ctrl+Shift+R` |
 
@@ -293,8 +293,8 @@ Act::CycleWindowPrev      // Cycle focus to previous window
 ```
 
 **Default keybindings:**
-- `Cmd+`` ` → `CycleWindowNext`
-- `Cmd+Shift+`` ` → `CycleWindowPrev`
+- `Cmd+Shift+>` → `CycleWindowNext`
+- `Cmd+Shift+<` → `CycleWindowPrev`
 - `Cmd+Shift+R` → `RealignWindows`
 
 ### 5. Configuration
@@ -334,7 +334,7 @@ Initial state (3 windows, Window B focused):
   peek                                        peek
   50px                                        50px
 
-User presses Cmd+` (cycle next → focus Window C):
+User presses Cmd+Shift+> (cycle next → focus Window C):
 
   |                                              |
   |]|           Window C (FOCUSED)            |[|
@@ -346,7 +346,7 @@ User presses Cmd+` (cycle next → focus Window C):
   B                                             A
   peek                                        peek
 
-User presses Cmd+` again (cycle next → focus Window A):
+User presses Cmd+Shift+> again (cycle next → focus Window A):
 
   |                                              |
   |]|           Window A (FOCUSED)            |[|
