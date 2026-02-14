@@ -82,7 +82,7 @@ pub enum RioEvent {
     Hide,
     HideOtherApplications,
     UpdateConfig,
-    CreateWindow,
+    CreateWindow(Option<String>),
     CloseWindow,
     CreateNativeTab(Option<String>),
     CreateConfigEditor,
@@ -211,7 +211,7 @@ impl Debug for RioEvent {
             RioEvent::Exit => write!(f, "Exit"),
             RioEvent::Quit => write!(f, "Quit"),
             RioEvent::CloseTerminal(route) => write!(f, "CloseTerminal {route}"),
-            RioEvent::CreateWindow => write!(f, "CreateWindow"),
+            RioEvent::CreateWindow(_) => write!(f, "CreateWindow"),
             RioEvent::CloseWindow => write!(f, "CloseWindow"),
             RioEvent::CreateNativeTab(_) => write!(f, "CreateNativeTab"),
             RioEvent::SelectNativeTabByIndex(tab_index) => {

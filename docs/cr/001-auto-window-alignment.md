@@ -1,108 +1,112 @@
 # CR-001: Auto Window Alignment (Focus-Centered Tiling)
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-02-14
 **Author:** wk
 
 ## Summary
 
-Automatically arrange Rio terminal windows in a focus-centered layout. The **active (focused) window always occupies the center** of the screen at full size. **Unfocused windows are positioned beyond the desktop edges** (off-screen) so they are hidden but still alive. When focus cycles to another window, it slides to center and the previously focused window moves off-screen. This gives a clean single-window experience while maintaining instant access to all windows via focus cycling.
+Automatically arrange Rio terminal windows in a focus-centered layout. The **focused window occupies the left portion** of the screen at a configurable width ratio (`align-width`). **Unfocused windows are stacked vertically on the right side**, sharing the remaining screen space. Cycling focus rotates which window sits on the left — others restack on the right. This gives a clean primary-window experience with secondary windows always visible, no external window manager needed.
 
 ## Motivation
 
-Currently, new Rio windows open at default OS positions (often overlapping). Users who work with multiple terminal windows must manually resize and position them every time. A focus-centered tiling layout keeps the most important window (the one you're working in) front and center, with secondary windows visible but out of the way — no external window manager needed.
+Currently, new Rio windows open at default OS positions (often overlapping). Users who work with multiple terminal windows must manually resize and position them every time. A focus-centered tiling layout keeps the most important window (the one you're working in) large and prominent, with secondary windows visible and stacked on the side for quick reference.
 
-## Current Architecture
+## Architecture
 
 All Rio windows run in a single process sharing one event loop:
 
 ```
 Application
-  -> Router { routes: FxHashMap<WindowId, Route> }
+  -> Router { routes: FxHashMap<WindowId, Route>, window_order: Vec<WindowId> }
        -> Route { RouteWindow { winit_window, screen } }
 ```
 
 - `Router.routes` holds every open window keyed by `WindowId`
-- `route.window.is_focused` tracks which window is active (`application.rs:1292`)
+- `Router.window_order` maintains stable creation-order for cycling
+- `route.window.is_focused` tracks which window is active
 - `EventProxy` sends events between windows via the shared event loop
 - `Application::user_event()` dispatches events and can iterate all routes
-- Window creation happens in `Router::create_window()` (`router/mod.rs:417`)
+- Window creation happens in `Router::create_window()` which returns the new `WindowId`
 
 Since all windows are in-process, no IPC is needed.
 
-## Proposed Behavior
+## Layout Behavior
 
-### Layout: Focus-Centered with Edge Peek
+### Focus + Right-Side Stack
 
-The focused window is centered on screen at full size. Unfocused windows are positioned mostly beyond the desktop edges, with a small **peek strip** visible — just enough to indicate their presence and allow click-to-focus.
+The focused window sits on the left at `align-width` ratio. All unfocused windows stack vertically on the right, dividing the remaining space equally in height with gaps between them.
 
 ```
-         Desktop visible area
+     Desktop visible area (2048px)
 |<----------------------------------------->|
-|                                           |
-|]  |        FOCUSED WINDOW          |  [   |
-|]  |         (full center)          |  [   |
-|]  |                                |  [   |
-|]  |                                |  [   |
-peek                                   peek
-Window A                               Window C
-(~50px visible)                        (~50px visible)
+|gap|                        |gap|          |gap|
+|   |    FOCUSED WINDOW      |   | Window A |   |
+|   |    (align-width: 80%)  |   |----------|   |
+|   |    1638px wide         |   | Window C |   |
+|   |                        |   |          |   |
+|   |                        |   | ~370px   |   |
 ```
 
-The peek strip acts as a visual hint: "there are more windows to the left/right." Clicking the peek area or using a keybinding brings that window to center.
-
-### Detailed Layout Rules
+### Layout Rules
 
 | Window Count | Focused Window | Unfocused Windows |
 |---|---|---|
-| 1 | Full screen | none |
-| 2 | Full screen | 1 peeking from left edge |
-| 3 | Full screen | 1 peeking left, 1 peeking right |
-| 4 | Full screen | 2 stacked peeking left, 1 peeking right |
-| N | Full screen | alternating left/right, stacked if multiple per side |
+| 1 | Centered at `align-width` ratio | none |
+| 2 | Left-aligned at `align-width` ratio | 1 stacked right, full height |
+| 3 | Left-aligned at `align-width` ratio | 2 stacked right, half height each |
+| N | Left-aligned at `align-width` ratio | N-1 stacked right, height = available / (N-1) |
 
-All windows are the same size as the focused window. Positioning:
-- **Focused:** `x = screen.x` (fully visible)
-- **Peek left:** `x = screen.x - window.width + peek_width` (only rightmost `peek_width` pixels visible)
-- **Peek right:** `x = screen.x + screen.width - peek_width` (only leftmost `peek_width` pixels visible)
+Positioning details:
+- **Focused (1 window):** centered horizontally, `x = screen.x + (screen.width - w) / 2`
+- **Focused (2+ windows):** left-aligned, `x = screen.x + gap`
+- **Stacked:** `x = focused.x + focused.width + gap`, sharing remaining width to screen edge minus gap
+- **Stacked height:** `(screen.height - 2*gap - (N-2)*gap) / (N-1)` per window, with gap between each
 
-When multiple windows peek from the same side, they stack vertically (each gets a fraction of the screen height) so all peek strips are visible.
+Unfocused windows maintain their PTY sessions, so content is always current when cycled into focus.
 
-Unfocused windows keep their PTY sessions running, so content is always up to date when cycled into view.
+### Focus Cycling (Carousel)
 
-### Focus Cycling (Keyboard-Centric)
+Windows form a ring in creation order. Cycling advances the focus forward or backward through the ring. The focused window always moves to the left position; all others restack on the right.
 
-This feature is **keyboard-centric**. Since unfocused windows are mostly off-screen, clicking them is unreliable across platforms. All window switching is done via keybindings:
+Example with [A, B, C], focus B:
+```
+left: B (80%)  right stack: [C, A]
+```
+Cycle next → focus C:
+```
+left: C (80%)  right stack: [A, B]
+```
+Cycle next → focus A:
+```
+left: A (80%)  right stack: [B, C]
+```
 
-| Action | Default Keybinding (macOS) | Default (Linux/Windows) |
-|---|---|---|
-| Cycle to next window | `Cmd+Shift+>` | `Alt+Shift+>` |
-| Cycle to previous window | `Cmd+Shift+<` | `Alt+Shift+<` |
-| Focus window by number | `Cmd+Ctrl+1/2/3/...` | `Alt+Ctrl+1/2/3/...` |
-| Re-align all windows | `Cmd+Shift+R` | `Ctrl+Shift+R` |
+### Keybindings
 
-On focus change:
-1. Previously focused window slides to a peek position (left or right edge)
-2. Newly focused window slides to center
-3. Other unfocused windows rebalance their peek positions
+| Action | macOS | Linux/Windows | Config string |
+|---|---|---|---|
+| Cycle to next window | `Cmd+Shift+.` | `Alt+Shift+.` | `"cyclewindownext"` |
+| Cycle to previous window | `Cmd+Shift+,` | `Alt+Shift+,` | `"cyclewindowprev"` |
+| Re-align all windows | `Cmd+Shift+R` | `Alt+Shift+R` | `"alignwindows"` |
 
-The cycle order is based on window creation order (stable, predictable). Direct selection by number (`Cmd+Ctrl+1`) uses the same ordering.
-
-If the user happens to click a peek strip and the OS delivers the focus event, it is handled the same way — the clicked window moves to center. But this is not the expected primary workflow.
+**Note:** Keybindings use base characters `.` and `,` (not `>` and `<`) because `key_without_modifiers()` strips the Shift modifier. The user presses `Cmd+Shift+>` but the key is matched as `Cmd+Shift+.`.
 
 ### Trigger Events
 
-Layout recalculates when:
-- A window gains focus (`WindowEvent::Focused(true)`)
-- A new window is created (new window gets focus and becomes center)
-- A window is closed (remaining windows redistribute)
+Layout recalculates on:
+- Window gains focus (`WindowEvent::Focused(true)`)
+- New window created (`RioEvent::CreateWindow`) — new window becomes focused
+- Window closed — remaining windows redistribute
+- Config reload — re-applies layout with updated settings
+- Manual trigger (`AlignWindows` action)
+- Focus cycling (`CycleWindowNext` / `CycleWindowPrev` actions)
 
-## Design
+## Implementation
 
-### 1. Screen Geometry
+### 1. Layout Engine — `router/alignment.rs`
 
 ```rust
-// router/alignment.rs (new file)
 pub struct ScreenArea {
     pub x: i32,
     pub y: i32,
@@ -110,15 +114,6 @@ pub struct ScreenArea {
     pub height: u32,
 }
 
-pub fn get_available_screen_area(window: &Window) -> ScreenArea {
-    // Use winit's MonitorHandle to get work area
-    // Accounts for menu bar, dock, taskbar
-}
-```
-
-### 2. Layout Calculator (Edge Peek)
-
-```rust
 pub struct WindowSlot {
     pub x: i32,
     pub y: i32,
@@ -126,275 +121,151 @@ pub struct WindowSlot {
     pub height: u32,
 }
 
-pub enum PeekSide {
-    Left,
-    Right,
-}
+/// Get screen area using CGDisplay::main() on macOS (avoids NSScreen crash)
+/// or current_monitor() on other platforms.
+pub fn get_available_screen_area(window: &Window) -> Option<ScreenArea>;
 
-/// Position for the focused window: full screen.
-pub fn focused_slot(screen: &ScreenArea) -> WindowSlot {
-    WindowSlot {
-        x: screen.x,
-        y: screen.y,
-        width: screen.width,
-        height: screen.height,
-    }
-}
-
-/// Position for an unfocused window peeking from an edge.
-/// `stack_index` and `stack_count` control vertical stacking when
-/// multiple windows peek from the same side.
-pub fn peek_slot(
+/// Focused window position. Centered if alone, left-aligned if has peers.
+pub fn focused_slot(
     screen: &ScreenArea,
-    side: PeekSide,
-    peek_width: u32,
-    stack_index: usize,
-    stack_count: usize,
-) -> WindowSlot {
-    let x = match side {
-        // Window extends to the left; only the rightmost `peek_width` is on screen
-        PeekSide::Left => screen.x - screen.width as i32 + peek_width as i32,
-        // Window extends to the right; only the leftmost `peek_width` is on screen
-        PeekSide::Right => screen.x + screen.width as i32 - peek_width as i32,
-    };
+    gap: u32,
+    align_width: f32,
+    has_peers: bool,
+) -> WindowSlot;
 
-    // Vertical stacking: divide screen height among windows on the same side
-    let slot_height = screen.height / stack_count.max(1) as u32;
-    let y = screen.y + (stack_index as u32 * slot_height) as i32;
-
-    WindowSlot {
-        x,
-        y,
-        width: screen.width,
-        height: slot_height,
-    }
-}
-```
-
-### 3. Layout Application
-
-```rust
-/// Maintain a stable ordering of window IDs for consistent cycling.
-/// Stored in Router as: pub window_order: Vec<WindowId>
-
+/// Apply layout: focused left, unfocused stacked right.
 pub fn apply_layout(
     routes: &mut FxHashMap<WindowId, Route>,
     focused_id: WindowId,
     window_order: &[WindowId],
     screen: &ScreenArea,
-    peek_width: u32,
-) {
-    // Move focused window to center (full screen)
-    if let Some(route) = routes.get_mut(&focused_id) {
-        let slot = focused_slot(screen);
-        route.window.winit_window.set_outer_position(
-            PhysicalPosition::new(slot.x, slot.y)
-        );
-        let _ = route.window.winit_window.request_inner_size(
-            PhysicalSize::new(slot.width, slot.height)
-        );
-    }
+    _peek_width: u32,
+    gap: u32,
+    align_width: f32,
+);
 
-    // Distribute unfocused windows to left/right peek positions
-    let mut left_windows: Vec<WindowId> = Vec::new();
-    let mut right_windows: Vec<WindowId> = Vec::new();
-
-    for id in window_order {
-        if *id == focused_id {
-            continue;
-        }
-        if left_windows.len() <= right_windows.len() {
-            left_windows.push(*id);
-        } else {
-            right_windows.push(*id);
-        }
-    }
-
-    // Position left-side peek windows (stacked vertically)
-    for (i, id) in left_windows.iter().enumerate() {
-        let slot = peek_slot(screen, PeekSide::Left, peek_width,
-                             i, left_windows.len());
-        if let Some(route) = routes.get_mut(id) {
-            route.window.winit_window.set_outer_position(
-                PhysicalPosition::new(slot.x, slot.y)
-            );
-            let _ = route.window.winit_window.request_inner_size(
-                PhysicalSize::new(slot.width, slot.height)
-            );
-        }
-    }
-
-    // Position right-side peek windows (stacked vertically)
-    for (i, id) in right_windows.iter().enumerate() {
-        let slot = peek_slot(screen, PeekSide::Right, peek_width,
-                             i, right_windows.len());
-        if let Some(route) = routes.get_mut(id) {
-            route.window.winit_window.set_outer_position(
-                PhysicalPosition::new(slot.x, slot.y)
-            );
-            let _ = route.window.winit_window.request_inner_size(
-                PhysicalSize::new(slot.width, slot.height)
-            );
-        }
-    }
-}
-
-/// Cycle focus to the next/previous window in order.
+/// Cycle focus to next/previous window and re-layout.
 pub fn cycle_focus(
     routes: &mut FxHashMap<WindowId, Route>,
     window_order: &[WindowId],
     current_focused: WindowId,
     screen: &ScreenArea,
     peek_width: u32,
+    gap: u32,
+    align_width: f32,
     reverse: bool,
-) -> WindowId {
-    let current_idx = window_order.iter()
-        .position(|id| *id == current_focused)
-        .unwrap_or(0);
-    let next_idx = if reverse {
-        if current_idx == 0 { window_order.len() - 1 }
-        else { current_idx - 1 }
-    } else {
-        (current_idx + 1) % window_order.len()
-    };
-    let new_focused = window_order[next_idx];
+) -> Option<WindowId>;
+```
 
-    // Focus the new window
-    if let Some(route) = routes.get(&new_focused) {
-        route.window.winit_window.focus_window();
-    }
+All positions use `LogicalPosition` / `LogicalSize` (not Physical) because macOS CGDisplay returns logical points — using Physical on Retina would double-divide by scale factor.
 
-    apply_layout(routes, new_focused, window_order, screen, peek_width);
-    new_focused
+### 2. Events — `rio-backend/src/event/mod.rs`
+
+```rust
+pub enum RioEvent {
+    // ...existing variants...
+    AlignWindows,
+    CycleWindowNext,
+    CycleWindowPrev,
 }
 ```
 
-### 4. Integration Points
+### 3. Actions — `frontends/rioterm/src/bindings/mod.rs`
 
-**Focus change** (`application.rs:1286`):
-When `WindowEvent::Focused(true)` fires, call `apply_focus_centered_layout()` with the newly focused `WindowId`.
-
-**Window creation** (`router/mod.rs:417`):
-After inserting the new route, the new window gains focus, triggering the layout.
-
-**Window close** (`application.rs`, route removal):
-After removing a route, recalculate layout for the remaining windows with the currently focused one as center.
-
-**New `RioEvent` variant:**
 ```rust
-RioEvent::RealignWindows
+pub enum Action {
+    // ...existing variants...
+    CycleWindowNext,
+    CycleWindowPrev,
+    AlignWindows,
+}
 ```
 
-**New actions:**
-```rust
-Act::RealignWindows       // Force re-alignment (clears pinned state)
-Act::CycleWindowNext      // Cycle focus to next window
-Act::CycleWindowPrev      // Cycle focus to previous window
-```
+String mappings: `"cyclewindownext"`, `"cyclewindowprev"`, `"alignwindows"`.
 
-**Default keybindings:**
-- `Cmd+Shift+>` → `CycleWindowNext`
-- `Cmd+Shift+<` → `CycleWindowPrev`
-- `Cmd+Shift+R` → `RealignWindows`
+### 4. Router — `router/mod.rs`
 
-### 5. Configuration
+- Added `window_order: Vec<WindowId>` field for stable cycling order
+- `remove_window(&mut self, id: &WindowId)` removes from both `routes` and `window_order`
+- `create_window()` returns `WindowId` (was void)
+
+### 5. Application Integration — `application.rs`
+
+Core methods on `impl Application<'_>` (not the `ApplicationHandler` trait impl):
+
+- `align_windows_with(override_focused: Option<WindowId>)` — main layout method; reads config, gets screen area, calls `apply_layout()`
+- `align_windows()` — convenience wrapper calling `align_windows_with(None)`
+- `cycle_window_focus(reverse: bool)` — finds focused window, calls `cycle_focus()`
+
+Guard: all methods early-return if `auto_align` is false in config.
+
+### 6. Configuration — `rio-backend/src/config/window.rs`
 
 ```toml
 [window]
-auto-align = true
-peek-width = 50             # pixels of unfocused window visible at screen edge
+auto-align = true       # bool, default false — enables the feature
+peek-width = 50         # u32, default 50 — reserved for future use
+align-gap = 20          # u32, default 10 — pixels between windows
+align-width = 0.8       # f32, default 1.0 — focused window width as ratio of screen (0.1–1.0)
 ```
 
-### 6. Pinned Window Tracking
+### 7. Platform Notes
 
-```rust
-pub struct RouteWindow<'a> {
-    // ... existing fields ...
-    pub is_pinned: bool,
-}
-```
+**macOS:** `get_available_screen_area()` uses `CGDisplay::main()` from the `core-graphics` crate instead of `current_monitor()`. The winit/objc2-foundation `NSScreen` enumeration crashes due to `NSEnumerator` type mismatch. Core Graphics returns logical points directly.
 
-- Manual move/resize sets `is_pinned = true` — window is excluded from auto-layout
-- `RealignWindows` action clears all pinned states and re-tiles
+**Cargo dependency:** `core-graphics = "0.24.0"` added under `[target.'cfg(target_os = "macos")'.dependencies]` in `frontends/rioterm/Cargo.toml`.
 
 ## Visual Example
 
 ```
-Initial state (3 windows, Window B focused):
+3 windows, Window B focused (align-width: 0.8, gap: 20):
 
-  Desktop edge                          Desktop edge
-  |                                              |
-  |]|           Window B (FOCUSED)            |[|
-  |]|                                         |[|
-  |]|           full screen, centered         |[|
-  |]|                                         |[|
-  |]|                                         |[|
-  | |                                         | |
-  A                                             C
-  peek                                        peek
-  50px                                        50px
+  |20|        Window B (FOCUSED)        |20|  Window A  |20|
+  |  |          1638px wide             |  |  ~370px    |  |
+  |  |                                  |  |  ~556px h  |  |
+  |  |                                  |  |------------|  |
+  |  |          full height             |  |  Window C  |  |
+  |  |          minus gaps              |  |  ~370px    |  |
+  |  |                                  |  |  ~556px h  |  |
 
-User presses Cmd+Shift+> (cycle next → focus Window C):
+Cycle next → focus C:
 
-  |                                              |
-  |]|           Window C (FOCUSED)            |[|
-  |]|                                         |[|
-  |]|           full screen, centered         |[|
-  |]|                                         |[|
-  |]|                                         |[|
-  | |                                         | |
-  B                                             A
-  peek                                        peek
+  |20|        Window C (FOCUSED)        |20|  Window A  |20|
+  |  |          1638px wide             |  |  ~370px    |  |
+  |  |                                  |  |------------|  |
+  |  |                                  |  |  Window B  |  |
+  |  |                                  |  |  ~370px    |  |
 
-User presses Cmd+Shift+> again (cycle next → focus Window A):
+Cycle next → focus A:
 
-  |                                              |
-  |]|           Window A (FOCUSED)            |[|
-  |]|                                         |[|
-  |]|           full screen, centered         |[|
-  |]|                                         |[|
-  |]|                                         |[|
-  | |                                         | |
-  C                                             B
-  peek                                        peek
+  |20|        Window A (FOCUSED)        |20|  Window B  |20|
+  |  |          1638px wide             |  |  ~370px    |  |
+  |  |                                  |  |------------|  |
+  |  |                                  |  |  Window C  |  |
+  |  |                                  |  |  ~370px    |  |
 
-With 4 windows (D focused), left side stacks vertically:
+Single window (centered):
 
-  |                                              |
-  |]|                                         |[|
-  A |           Window D (FOCUSED)            |[|
-  |]|                                         | |
-  ---           full screen, centered         |[|
-  |]|                                         C |
-  B |                                         |[|
-  |]|                                         | |
-  peek                                        peek
-  (A and B                                    (C alone,
-   stacked)                                    full height)
+  |        |20|      Window A (FOCUSED)     |20|        |
+  |        |  |        1638px wide          |  |        |
+  |  205px |  |        centered             |  | 205px  |
 ```
 
-## Implementation Plan
+## Implementation Phases (Completed)
 
-1. **Phase 1:** Add `router/alignment.rs` with screen geometry and focus-centered layout calculator
-2. **Phase 2:** Hook into `WindowEvent::Focused(true)` to trigger layout on focus change
-3. **Phase 3:** Hook into `create_window()` and window close for layout recalculation
-4. **Phase 4:** Add `RealignWindows` and `CycleWindowFocus` keybindings
-5. **Phase 5:** Add config options (`auto-align`, `center-ratio`, `align-gap`)
-6. **Phase 6:** Pinned window support and multi-monitor awareness
-
-## Open Questions
-
-- Should layout transitions be animated (smooth slide) or instant snap?
-- Debounce focus events? (Rapid cycling could cause layout thrashing)
-- Should peek strips show a visual indicator (e.g., tab title, window number)?
-- How to handle macOS native tabs (multiple tabs = one window)?
-- Should peek windows be dimmed/blurred to emphasize the focused center?
-- Should the peek width scale with display DPI?
-- Can the user click the peek strip to focus that window, or only use keybindings?
+1. Added `router/alignment.rs` with screen geometry and layout calculator
+2. Hooked into `WindowEvent::Focused(true)` to trigger layout on focus change
+3. Hooked into `create_window()` and window close for layout recalculation
+4. Added `AlignWindows`, `CycleWindowNext`, `CycleWindowPrev` keybindings
+5. Added config options (`auto-align`, `align-gap`, `align-width`)
+6. Fixed macOS screen detection (CGDisplay instead of NSScreen)
+7. Fixed logical vs physical coordinate handling for Retina displays
+8. Switched from left/right peek to right-side stack layout
 
 ## Dependencies
 
-- `winit` / `rio-window`: `Window::set_outer_position()`, `Window::request_inner_size()`, `MonitorHandle`
-- `route.window.is_focused` (already exists at `router/mod.rs:493`)
-- No external dependencies required
+- `winit` / `rio-window`: `Window::set_outer_position()`, `Window::request_inner_size()`, `Window::focus_window()`
+- `core-graphics` (macOS only): `CGDisplay::main()` for screen bounds
+- `route.window.is_focused` (already exists)
+- No external dependencies beyond `core-graphics`
 - No IPC needed (all in-process)

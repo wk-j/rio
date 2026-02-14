@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 
 use super::Route;
 
-/// Represents the usable screen area (accounting for menu bar, dock, taskbar).
+/// Represents the usable screen area.
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenArea {
     pub x: i32,
@@ -20,13 +20,6 @@ pub struct WindowSlot {
     pub y: i32,
     pub width: u32,
     pub height: u32,
-}
-
-/// Which screen edge an unfocused window peeks from.
-#[derive(Debug, Clone, Copy)]
-pub enum PeekSide {
-    Left,
-    Right,
 }
 
 /// Get the available screen area for the main display.
@@ -56,7 +49,6 @@ pub fn get_available_screen_area(
     }
     #[cfg(not(target_os = "macos"))]
     {
-        // On non-macOS, try current_monitor first
         if let Some(monitor) = _window.current_monitor() {
             let size = monitor.size();
             let pos = monitor.position();
@@ -67,7 +59,6 @@ pub fn get_available_screen_area(
                 height: size.height,
             });
         }
-        // Fallback: use the window's outer size positioned at origin
         let size = _window.outer_size();
         if size.width == 0 || size.height == 0 {
             return None;
@@ -81,12 +72,27 @@ pub fn get_available_screen_area(
     }
 }
 
-/// Position for the focused window: centered with `align_width` ratio and gap.
-pub fn focused_slot(screen: &ScreenArea, gap: u32, align_width: f32) -> WindowSlot {
+/// Position for the focused window.
+///
+/// - With 1 window: centered at `align_width` ratio.
+/// - With 2 windows: left-aligned at `align_width` ratio.
+/// - With 3+ windows: left-aligned at `align_width` ratio.
+pub fn focused_slot(
+    screen: &ScreenArea,
+    gap: u32,
+    align_width: f32,
+    has_peers: bool,
+) -> WindowSlot {
     let ratio = align_width.clamp(0.1, 1.0);
     let w = (screen.width as f32 * ratio) as u32;
     let h = screen.height.saturating_sub(gap * 2);
-    let x = screen.x + ((screen.width - w) / 2) as i32;
+    let x = if has_peers {
+        // Left-aligned with gap
+        screen.x + gap as i32
+    } else {
+        // Centered
+        screen.x + ((screen.width - w) / 2) as i32
+    };
     let y = screen.y + gap as i32;
     WindowSlot {
         x,
@@ -96,41 +102,7 @@ pub fn focused_slot(screen: &ScreenArea, gap: u32, align_width: f32) -> WindowSl
     }
 }
 
-/// Position for an unfocused window peeking from an edge.
-///
-/// `stack_index` and `stack_count` control vertical stacking when
-/// multiple windows peek from the same side.
-pub fn peek_slot(
-    screen: &ScreenArea,
-    side: PeekSide,
-    peek_width: u32,
-    stack_index: usize,
-    stack_count: usize,
-) -> WindowSlot {
-    let x = match side {
-        // Window extends to the left; only the rightmost `peek_width` is on screen
-        PeekSide::Left => screen.x - screen.width as i32 + peek_width as i32,
-        // Window extends to the right; only the leftmost `peek_width` is on screen
-        PeekSide::Right => screen.x + screen.width as i32 - peek_width as i32,
-    };
-
-    // Vertical stacking: divide screen height among windows on the same side
-    let count = stack_count.max(1) as u32;
-    let slot_height = screen.height / count;
-    let y = screen.y + (stack_index as u32 * slot_height) as i32;
-
-    WindowSlot {
-        x,
-        y,
-        width: screen.width,
-        height: slot_height,
-    }
-}
-
 /// Apply a computed slot (position + size) to a window using logical coordinates.
-///
-/// On macOS, `CGDisplay` bounds are in points (logical), so we use
-/// `LogicalPosition` / `LogicalSize` to avoid double scale-factor division.
 fn apply_slot(route: &mut Route, slot: &WindowSlot) {
     route
         .window
@@ -142,53 +114,76 @@ fn apply_slot(route: &mut Route, slot: &WindowSlot) {
         .request_inner_size(LogicalSize::new(slot.width, slot.height));
 }
 
-/// Apply focus-centered layout to all windows.
+/// Apply focus-centered layout with right-side stack.
 ///
-/// The focused window fills the screen center. Unfocused windows are
-/// distributed to left/right peek positions (alternating, stacked
-/// vertically when multiple windows share a side).
+/// The focused window sits on the left at `align_width` ratio.
+/// All unfocused windows are stacked vertically on the right side,
+/// sharing the remaining screen width equally in height.
+///
+/// Cycling rotates which window is focused — the focused window
+/// always moves to the left, others stack on the right.
+///
+/// Example with [A, B, C], focus B:
+///   left: B (80%)  right stack: [A, C] (20%, split vertically)
+/// Cycle next, focus C:
+///   left: C (80%)  right stack: [A, B] (20%, split vertically)
 pub fn apply_layout(
     routes: &mut FxHashMap<WindowId, Route>,
     focused_id: WindowId,
     window_order: &[WindowId],
     screen: &ScreenArea,
-    peek_width: u32,
+    _peek_width: u32,
     gap: u32,
     align_width: f32,
 ) {
-    // Move focused window to center
+    let len = window_order.len();
+    if len == 0 {
+        return;
+    }
+
+    let has_peers = len > 1;
+
+    // Position focused window (centered if alone, left-aligned if has peers)
+    let focused = focused_slot(screen, gap, align_width, has_peers);
     if let Some(route) = routes.get_mut(&focused_id) {
-        let slot = focused_slot(screen, gap, align_width);
-        apply_slot(route, &slot);
+        apply_slot(route, &focused);
     }
 
-    // Distribute unfocused windows to left/right peek positions
-    let mut left_windows: Vec<WindowId> = Vec::new();
-    let mut right_windows: Vec<WindowId> = Vec::new();
-
-    for id in window_order {
-        if *id == focused_id {
-            continue;
-        }
-        // Alternate: fill the side with fewer windows first
-        if left_windows.len() <= right_windows.len() {
-            left_windows.push(*id);
-        } else {
-            right_windows.push(*id);
-        }
+    if !has_peers {
+        return;
     }
 
-    // Position left-side peek windows (stacked vertically)
-    for (i, id) in left_windows.iter().enumerate() {
-        let slot = peek_slot(screen, PeekSide::Left, peek_width, i, left_windows.len());
-        if let Some(route) = routes.get_mut(id) {
-            apply_slot(route, &slot);
-        }
+    // Collect unfocused windows in ring order (preserves carousel rotation)
+    let focused_idx = window_order
+        .iter()
+        .position(|id| *id == focused_id)
+        .unwrap_or(0);
+
+    let mut stack_windows: Vec<WindowId> = Vec::with_capacity(len - 1);
+    for step in 1..len {
+        let idx = (focused_idx + step) % len;
+        stack_windows.push(window_order[idx]);
     }
 
-    // Position right-side peek windows (stacked vertically)
-    for (i, id) in right_windows.iter().enumerate() {
-        let slot = peek_slot(screen, PeekSide::Right, peek_width, i, right_windows.len());
+    // Stack area: right of focused window + gap, filling to screen edge
+    let stack_x = focused.x + focused.width as i32 + gap as i32;
+    let screen_right = screen.x + screen.width as i32 - gap as i32;
+    let stack_w = (screen_right - stack_x).max(0) as u32;
+    let stack_count = stack_windows.len() as u32;
+
+    // Divide height evenly among stacked windows, with gap between them
+    let total_gaps = (stack_count.saturating_sub(1)) * gap;
+    let available_height = screen.height.saturating_sub(gap * 2 + total_gaps);
+    let slot_height = available_height / stack_count;
+
+    for (i, id) in stack_windows.iter().enumerate() {
+        let y = screen.y + gap as i32 + (i as u32 * (slot_height + gap)) as i32;
+        let slot = WindowSlot {
+            x: stack_x,
+            y,
+            width: stack_w,
+            height: slot_height,
+        };
         if let Some(route) = routes.get_mut(id) {
             apply_slot(route, &slot);
         }
@@ -230,7 +225,7 @@ pub fn cycle_focus(
 
     let new_focused = window_order[next_idx];
 
-    // Focus the new window (this will also trigger WindowEvent::Focused)
+    // Focus the new window
     if let Some(route) = routes.get(&new_focused) {
         route.window.winit_window.focus_window();
     }

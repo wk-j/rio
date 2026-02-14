@@ -555,8 +555,22 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
 
     #[inline]
     pub fn create_new_window(&self) {
+        let mut working_dir = self.config.working_dir.clone();
+        if self.config.cwd {
+            #[cfg(not(target_os = "windows"))]
+            {
+                let current_context = self.current();
+                if let Ok(path) = teletypewriter::foreground_process_path(
+                    *current_context.main_fd,
+                    current_context.shell_pid,
+                ) {
+                    working_dir = Some(path.to_string_lossy().to_string());
+                }
+            }
+        }
+
         self.event_proxy
-            .send_event(RioEvent::CreateWindow, self.window_id);
+            .send_event(RioEvent::CreateWindow(working_dir), self.window_id);
     }
 
     #[inline]

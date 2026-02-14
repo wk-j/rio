@@ -272,10 +272,39 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
         update_colors_based_on_theme(&mut self.config, event_loop.system_theme());
 
+        // Inherit CWD from focused window if available
+        let config = if cause == StartCause::CreateWindow
+            && self.config.navigation.current_working_directory
+        {
+            let mut working_dir = None;
+            #[cfg(not(target_os = "windows"))]
+            if let Some(focused_id) = self.router.get_focused_route() {
+                if let Some(route) = self.router.routes.get(&focused_id) {
+                    let ctx = route.window.screen.ctx().current();
+                    if let Ok(path) = teletypewriter::foreground_process_path(
+                        *ctx.main_fd,
+                        ctx.shell_pid,
+                    ) {
+                        working_dir = Some(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+            if working_dir.is_some() {
+                rio_backend::config::Config {
+                    working_dir,
+                    ..self.config.clone()
+                }
+            } else {
+                self.config.clone()
+            }
+        } else {
+            self.config.clone()
+        };
+
         let new_id = self.router.create_window(
             event_loop,
             self.event_proxy.clone(),
-            &self.config,
+            &config,
             None,
             self.app_id.as_deref(),
         );
@@ -513,6 +542,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     } else {
                         route.clear_errors();
                     }
+                }
+
+                // Re-align windows after config reload
+                if self.config.window.auto_align {
+                    self.align_windows();
                 }
             }
             RioEventType::Rio(RioEvent::Exit) => {
@@ -773,11 +807,19 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         .send_bytes(format(color).into_bytes());
                 }
             }
-            RioEventType::Rio(RioEvent::CreateWindow) => {
+            RioEventType::Rio(RioEvent::CreateWindow(working_dir_overwrite)) => {
+                let config = if working_dir_overwrite.is_some() {
+                    rio_backend::config::Config {
+                        working_dir: working_dir_overwrite,
+                        ..self.config.clone()
+                    }
+                } else {
+                    self.config.clone()
+                };
                 let new_id = self.router.create_window(
                     event_loop,
                     self.event_proxy.clone(),
-                    &self.config,
+                    &config,
                     None,
                     self.app_id.as_deref(),
                 );
