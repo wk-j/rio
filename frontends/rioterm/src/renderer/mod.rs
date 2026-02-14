@@ -1196,6 +1196,7 @@ impl Renderer {
             context_manager,
             self.search.active_search.is_some(),
             &mut objects,
+            qt_visible,
         );
 
         if has_search {

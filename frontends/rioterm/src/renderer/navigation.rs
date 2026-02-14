@@ -34,6 +34,7 @@ impl ScreenNavigation {
         context_manager: &crate::context::ContextManager<rio_backend::event::EventProxy>,
         is_search_active: bool,
         objects: &mut Vec<Object>,
+        qt_visible: bool,
     ) {
         // When search is active then BottomTab should not be rendered
         if is_search_active && self.navigation.mode == NavigationMode::BottomTab {
@@ -56,6 +57,7 @@ impl ScreenNavigation {
                 current,
                 self.navigation.hide_if_single,
                 dimensions,
+                qt_visible,
             ),
             NavigationMode::TopTab => {
                 let position_y = 0.0;
@@ -102,6 +104,7 @@ impl ScreenNavigation {
         current: usize,
         hide_if_single: bool,
         dimensions: (f32, f32, f32),
+        qt_visible: bool,
     ) {
         if hide_if_single && len <= 1 {
             return;
@@ -115,7 +118,8 @@ impl ScreenNavigation {
         let radius = style.border_radius;
 
         for i in (0..len).rev() {
-            let is_active = i == current;
+            // When quick terminal is active, no tab appears "active"
+            let is_active = !qt_visible && i == current;
 
             let mut color = if style.hue_rotation {
                 let hue = style.base_hue + (i as f32) * style.hue_step;
