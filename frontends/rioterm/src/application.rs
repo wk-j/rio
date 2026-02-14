@@ -174,6 +174,85 @@ impl Application<'_> {
         let result = event_loop.run_app(self);
         result.map_err(Into::into)
     }
+
+    /// Apply focus-centered alignment layout to all windows.
+    /// If `override_focused` is Some, use that as the focused window instead of querying.
+    fn align_windows_with(&mut self, override_focused: Option<WindowId>) {
+        if self.router.window_order.is_empty() {
+            return;
+        }
+
+        let focused_id = match override_focused
+            .or_else(|| self.router.get_focused_route())
+            .or_else(|| self.router.window_order.last().copied())
+        {
+            Some(id) => id,
+            None => return,
+        };
+
+        let screen = match self.router.routes.get(&focused_id) {
+            Some(route) => crate::router::alignment::get_available_screen_area(
+                &route.window.winit_window,
+            ),
+            None => return,
+        };
+
+        let screen = match screen {
+            Some(s) => s,
+            None => return,
+        };
+
+        crate::router::alignment::apply_layout(
+            &mut self.router.routes,
+            focused_id,
+            &self.router.window_order,
+            &screen,
+            self.config.window.peek_width,
+            self.config.window.align_gap,
+            self.config.window.align_width,
+        );
+    }
+
+    /// Convenience: align using the currently focused window.
+    fn align_windows(&mut self) {
+        self.align_windows_with(None);
+    }
+
+    /// Cycle focus to the next or previous window and re-align.
+    fn cycle_window_focus(&mut self, reverse: bool) {
+        let focused_id = match self
+            .router
+            .get_focused_route()
+            .or_else(|| self.router.window_order.last().copied())
+        {
+            Some(id) => id,
+            None => return,
+        };
+
+        let screen = match self.router.routes.get(&focused_id) {
+            Some(route) => crate::router::alignment::get_available_screen_area(
+                &route.window.winit_window,
+            ),
+            None => return,
+        };
+
+        let screen = match screen {
+            Some(s) => s,
+            None => return,
+        };
+
+        let window_order = self.router.window_order.clone();
+        crate::router::alignment::cycle_focus(
+            &mut self.router.routes,
+            &window_order,
+            focused_id,
+            &screen,
+            self.config.window.peek_width,
+            self.config.window.align_gap,
+            self.config.window.align_width,
+            reverse,
+        );
+    }
 }
 
 impl ApplicationHandler<EventPayload> for Application<'_> {
@@ -193,13 +272,18 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
         update_colors_based_on_theme(&mut self.config, event_loop.system_theme());
 
-        self.router.create_window(
+        let new_id = self.router.create_window(
             event_loop,
             self.event_proxy.clone(),
             &self.config,
             None,
             self.app_id.as_deref(),
         );
+
+        // Auto-align the first window too
+        if self.config.window.auto_align {
+            self.align_windows_with(Some(new_id));
+        }
 
         // Schedule title updates every 2s
         let timer_id = TimerId::new(Topic::UpdateTitles, 0);
@@ -449,13 +533,15 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         .context_manager
                         .should_close_context_manager(route_id)
                     {
-                        self.router.routes.remove(&window_id);
+                        self.router.remove_window(&window_id);
 
                         // Unschedule pending events.
                         self.scheduler.unschedule_window(route_id);
 
                         if self.router.routes.is_empty() {
                             event_loop.exit();
+                        } else if self.config.window.auto_align {
+                            self.align_windows();
                         }
                     } else {
                         let size = route.window.screen.context_manager.len();
@@ -688,13 +774,17 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
             }
             RioEventType::Rio(RioEvent::CreateWindow) => {
-                self.router.create_window(
+                let new_id = self.router.create_window(
                     event_loop,
                     self.event_proxy.clone(),
                     &self.config,
                     None,
                     self.app_id.as_deref(),
                 );
+                // Auto-align: treat the new window as focused
+                if self.config.window.auto_align {
+                    self.align_windows_with(Some(new_id));
+                }
             }
             #[cfg(target_os = "macos")]
             RioEventType::Rio(RioEvent::CreateNativeTab(working_dir_overwrite)) => {
@@ -735,9 +825,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
             #[cfg(target_os = "macos")]
             RioEventType::Rio(RioEvent::CloseWindow) => {
-                self.router.routes.remove(&window_id);
+                self.router.remove_window(&window_id);
                 if self.router.routes.is_empty() && !self.config.confirm_before_quit {
                     event_loop.exit();
+                } else if self.config.window.auto_align {
+                    self.align_windows();
                 }
             }
             #[cfg(target_os = "macos")]
@@ -808,6 +900,21 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     }
                 }
             }
+            RioEventType::Rio(RioEvent::AlignWindows) => {
+                if self.config.window.auto_align {
+                    self.align_windows();
+                }
+            }
+            RioEventType::Rio(RioEvent::CycleWindowNext) => {
+                if self.config.window.auto_align {
+                    self.cycle_window_focus(false);
+                }
+            }
+            RioEventType::Rio(RioEvent::CycleWindowPrev) => {
+                if self.config.window.auto_align {
+                    self.cycle_window_focus(true);
+                }
+            }
             _ => {}
         }
     }
@@ -876,7 +983,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             WindowEvent::CloseRequested => {
                 // MacOS doesn't exit the loop
                 if cfg!(target_os = "macos") && self.config.confirm_before_quit {
-                    self.router.routes.remove(&window_id);
+                    self.router.remove_window(&window_id);
                     return;
                 }
 
@@ -885,11 +992,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     route.request_redraw();
                     return;
                 } else {
-                    self.router.routes.remove(&window_id);
+                    self.router.remove_window(&window_id);
                 }
 
                 if self.router.routes.is_empty() {
                     event_loop.exit();
+                } else if self.config.window.auto_align {
+                    self.align_windows();
                 }
             }
 
@@ -1296,6 +1405,14 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
 
                 route.window.screen.on_focus_change(focused);
+
+                // Auto-align: must return early so the route borrow is released
+                // before we call align_windows which borrows self.router mutably.
+                if has_regained_focus && self.config.window.auto_align {
+                    // route borrow ends here due to early return
+                    self.align_windows();
+                    return;
+                }
             }
 
             WindowEvent::Occluded(occluded) => {

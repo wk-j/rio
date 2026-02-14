@@ -3632,6 +3632,7 @@ dependencies = [
  "clap",
  "copa",
  "corcovado",
+ "core-graphics 0.24.0",
  "cpal",
  "criterion",
  "dirs",

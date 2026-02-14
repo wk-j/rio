@@ -160,6 +160,15 @@ pub enum RioEvent {
     /// Color index: 0 for foreground, 1 for background, 2 for cursor color.
     ColorChange(usize, usize, Option<ColorRgb>),
 
+    /// Re-align all windows using focus-centered layout.
+    AlignWindows,
+
+    /// Cycle focus to the next window.
+    CycleWindowNext,
+
+    /// Cycle focus to the previous window.
+    CycleWindowPrev,
+
     // No operation
     Noop,
 }
@@ -221,6 +230,9 @@ impl Debug for RioEvent {
                 write!(f, "BlinkCursor {timeout} {route_id}")
             }
             RioEvent::UpdateTitles => write!(f, "UpdateTitles"),
+            RioEvent::AlignWindows => write!(f, "AlignWindows"),
+            RioEvent::CycleWindowNext => write!(f, "CycleWindowNext"),
+            RioEvent::CycleWindowPrev => write!(f, "CycleWindowPrev"),
             RioEvent::Noop => write!(f, "Noop"),
             RioEvent::Copy(_) => write!(f, "Copy"),
             RioEvent::Paste => write!(f, "Paste"),

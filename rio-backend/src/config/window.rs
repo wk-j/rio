@@ -104,6 +104,26 @@ pub struct Window {
     pub windows_corner_preference: Option<WindowsCornerPreference>,
     #[serde(default = "Colorspace::default")]
     pub colorspace: Colorspace,
+    #[serde(default = "bool::default", rename = "auto-align")]
+    pub auto_align: bool,
+    #[serde(default = "default_peek_width", rename = "peek-width")]
+    pub peek_width: u32,
+    #[serde(default = "default_align_gap", rename = "align-gap")]
+    pub align_gap: u32,
+    #[serde(default = "default_align_width", rename = "align-width")]
+    pub align_width: f32,
+}
+
+fn default_peek_width() -> u32 {
+    50
+}
+
+fn default_align_gap() -> u32 {
+    10
+}
+
+fn default_align_width() -> f32 {
+    1.0
 }
 
 impl Default for Window {
@@ -123,6 +143,10 @@ impl Default for Window {
             windows_use_no_redirection_bitmap: None,
             windows_corner_preference: None,
             colorspace: Colorspace::default(),
+            auto_align: false,
+            peek_width: default_peek_width(),
+            align_gap: default_align_gap(),
+            align_width: default_align_width(),
         }
     }
 }

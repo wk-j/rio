@@ -264,6 +264,9 @@ impl From<String> for Action {
             "movedividerright" => Some(Action::MoveDividerRight),
             "togglezoom" => Some(Action::ToggleZoom),
             "togglequickterminal" => Some(Action::ToggleQuickTerminal),
+            "cyclewindownext" => Some(Action::CycleWindowNext),
+            "cyclewindowprev" => Some(Action::CycleWindowPrev),
+            "alignwindows" => Some(Action::AlignWindows),
             "togglevimode" => Some(Action::ToggleViMode),
             "togglefullscreen" => Some(Action::ToggleFullscreen),
             "none" => Some(Action::None),
@@ -505,6 +508,15 @@ pub enum Action {
     /// Toggle quick terminal (drop-down terminal at bottom, inherits CWD)
     ToggleQuickTerminal,
 
+    /// Cycle focus to next window (auto-align)
+    CycleWindowNext,
+
+    /// Cycle focus to previous window (auto-align)
+    CycleWindowPrev,
+
+    /// Re-align all windows using focus-centered layout
+    AlignWindows,
+
     /// Allow receiving char input.
     ReceiveChar,
 
@@ -679,6 +691,11 @@ pub fn default_key_bindings(config: &rio_backend::config::Config) -> Vec<KeyBind
         Key::Named(ArrowDown), ModifiersState::SUPER, ~BindingMode::VI; Action::None;
         Key::Named(ArrowLeft), ModifiersState::SUPER, ~BindingMode::VI; Action::None;
         Key::Named(ArrowRight), ModifiersState::SUPER, ~BindingMode::VI; Action::None;
+        // Auto window alignment: Cmd+Shift+> (Cmd+Shift+.) and Cmd+Shift+< (Cmd+Shift+,)
+        // key_without_modifiers() strips shift, so we match on "." and ","
+        ".", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
+        ",", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
+        "r", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
         "0",                          +BindingMode::VI, ~BindingMode::SEARCH;
             ViMotion::First;
         "4",   ModifiersState::SHIFT, +BindingMode::VI, ~BindingMode::SEARCH;
@@ -1020,89 +1037,11 @@ pub fn platform_key_bindings(
         "n", ModifiersState::CONTROL,  +BindingMode::SEARCH; SearchAction::SearchHistoryNext;
         Key::Named(ArrowUp), +BindingMode::SEARCH; SearchAction::SearchHistoryPrevious;
         Key::Named(ArrowDown), +BindingMode::SEARCH; SearchAction::SearchHistoryNext;
-    );
-
-    if use_navigation_key_bindings {
-        key_bindings.extend(bindings!(
-            KeyBinding;
-            "t", ModifiersState::SUPER; Action::TabCreateNew;
-            Key::Named(Tab), ModifiersState::CONTROL; Action::SelectNextTab;
-            Key::Named(Tab), ModifiersState::CONTROL | ModifiersState::SHIFT; Action::SelectPrevTab;
-            "w", ModifiersState::SUPER; Action::CloseCurrentSplitOrTab;
-            "[", ModifiersState::SUPER | ModifiersState::SHIFT; Action::SelectPrevTab;
-            "]", ModifiersState::SUPER | ModifiersState::SHIFT; Action::SelectNextTab;
-            "1", ModifiersState::SUPER; Action::SelectTab(0);
-            "2", ModifiersState::SUPER; Action::SelectTab(1);
-            "3", ModifiersState::SUPER; Action::SelectTab(2);
-            "4", ModifiersState::SUPER; Action::SelectTab(3);
-            "5", ModifiersState::SUPER; Action::SelectTab(4);
-            "6", ModifiersState::SUPER; Action::SelectTab(5);
-            "7", ModifiersState::SUPER; Action::SelectTab(6);
-            "8", ModifiersState::SUPER; Action::SelectTab(7);
-            "9", ModifiersState::SUPER; Action::SelectLastTab;
-        ));
-    }
-
-    if config_keyboard.disable_ctlseqs_alt {
-        key_bindings.extend(bindings!(
-            KeyBinding;
-            Key::Named(ArrowLeft), ModifiersState::ALT,  ~BindingMode::VI;
-                Action::Esc("\x1bb".into());
-            Key::Named(ArrowRight), ModifiersState::ALT,  ~BindingMode::VI;
-                Action::Esc("\x1bf".into());
-        ));
-    }
-
-    if use_splits {
-        key_bindings.extend(bindings!(
-            KeyBinding;
-            "d", ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SplitRight;
-            "d", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SplitDown;
-            "]", ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SelectNextSplit;
-            "[", ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SelectPrevSplit;
-            Key::Named(ArrowUp), ModifiersState::CONTROL | ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerUp;
-            Key::Named(ArrowDown), ModifiersState::CONTROL | ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerDown;
-            Key::Named(ArrowLeft), ModifiersState::CONTROL | ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerLeft;
-            Key::Named(ArrowRight), ModifiersState::CONTROL | ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerRight;
-        ));
-    }
-
-    key_bindings
-}
-
-// Not Windows, Macos
-#[cfg(not(any(target_os = "macos", target_os = "windows", test)))]
-pub fn platform_key_bindings(
-    use_navigation_key_bindings: bool,
-    use_splits: bool,
-    _: ConfigKeyboard,
-) -> Vec<KeyBinding> {
-    let mut key_bindings = bindings!(
-        KeyBinding;
-        "v", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI; Action::Paste;
-        "c", ModifiersState::CONTROL | ModifiersState::SHIFT; Action::Copy;
-        "c", ModifiersState::CONTROL | ModifiersState::SHIFT,
-            +BindingMode::VI; Action::ClearSelection;
-        Key::Named(Insert),   ModifiersState::SHIFT, ~BindingMode::VI; Action::PasteSelection;
-        "0", ModifiersState::CONTROL;  Action::ResetFontSize;
-        "=", ModifiersState::CONTROL;  Action::IncreaseFontSize;
-        "+", ModifiersState::CONTROL;  Action::IncreaseFontSize;
-        "+", ModifiersState::CONTROL;  Action::IncreaseFontSize;
-        "-", ModifiersState::CONTROL;  Action::DecreaseFontSize;
-        "-", ModifiersState::CONTROL;  Action::DecreaseFontSize;
-        "n", ModifiersState::CONTROL | ModifiersState::SHIFT; Action::WindowCreateNew;
-        ",", ModifiersState::CONTROL | ModifiersState::SHIFT; Action::ConfigEditor;
-
-        // Search
-        "f", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::SEARCH; Action::SearchForward;
-        "b", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::SEARCH; Action::SearchBackward;
-        "c", ModifiersState::CONTROL, +BindingMode::SEARCH; SearchAction::SearchCancel;
-        "u", ModifiersState::CONTROL, +BindingMode::SEARCH; SearchAction::SearchClear;
-        "w", ModifiersState::CONTROL,  +BindingMode::SEARCH; SearchAction::SearchDeleteWord;
-        "p", ModifiersState::CONTROL,  +BindingMode::SEARCH; SearchAction::SearchHistoryPrevious;
-        "n", ModifiersState::CONTROL,  +BindingMode::SEARCH; SearchAction::SearchHistoryNext;
-        Key::Named(ArrowUp), +BindingMode::SEARCH; SearchAction::SearchHistoryPrevious;
-        Key::Named(ArrowDown), +BindingMode::SEARCH; SearchAction::SearchHistoryNext;
+        // Auto window alignment: Alt+Shift+> and Alt+Shift+<
+        // key_without_modifiers() strips shift, so we match on "." and ","
+        ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
+        ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
+        "r", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
     );
 
     if use_navigation_key_bindings {
@@ -1172,6 +1111,11 @@ pub fn platform_key_bindings(
         "n", ModifiersState::CONTROL,  +BindingMode::SEARCH; SearchAction::SearchHistoryNext;
         Key::Named(ArrowUp), +BindingMode::SEARCH; SearchAction::SearchHistoryPrevious;
         Key::Named(ArrowDown), +BindingMode::SEARCH; SearchAction::SearchHistoryNext;
+        // Auto window alignment: Alt+Shift+> (Alt+Shift+.) and Alt+Shift+< (Alt+Shift+,)
+        // key_without_modifiers() strips shift, so we match on "." and ","
+        ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
+        ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
+        "r", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
     );
 
     if use_navigation_key_bindings {

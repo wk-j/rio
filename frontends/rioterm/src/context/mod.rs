@@ -560,6 +560,24 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     }
 
     #[inline]
+    pub fn cycle_window_next(&self) {
+        self.event_proxy
+            .send_event(RioEvent::CycleWindowNext, self.window_id);
+    }
+
+    #[inline]
+    pub fn cycle_window_prev(&self) {
+        self.event_proxy
+            .send_event(RioEvent::CycleWindowPrev, self.window_id);
+    }
+
+    #[inline]
+    pub fn align_windows(&self) {
+        self.event_proxy
+            .send_event(RioEvent::AlignWindows, self.window_id);
+    }
+
+    #[inline]
     pub fn close_unfocused_tabs(&mut self) {
         let current_route_id = self.current().route_id;
         self.titles.titles.retain(|&i, _| i == self.current_index);

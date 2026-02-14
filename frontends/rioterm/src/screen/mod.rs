@@ -1001,6 +1001,15 @@ impl Screen<'_> {
                     Act::WindowCreateNew => {
                         self.context_manager.create_new_window();
                     }
+                    Act::CycleWindowNext => {
+                        self.context_manager.cycle_window_next();
+                    }
+                    Act::CycleWindowPrev => {
+                        self.context_manager.cycle_window_prev();
+                    }
+                    Act::AlignWindows => {
+                        self.context_manager.align_windows();
+                    }
                     Act::CloseCurrentSplitOrTab => {
                         self.close_split_or_tab();
                     }

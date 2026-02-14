@@ -1,3 +1,4 @@
+pub mod alignment;
 pub mod routes;
 mod window;
 use crate::event::EventProxy;
@@ -277,6 +278,8 @@ pub struct Router<'a> {
     pub config_route: Option<WindowId>,
     pub clipboard: Rc<RefCell<Clipboard>>,
     current_tab_id: u64,
+    /// Stable window creation order for focus-centered alignment cycling.
+    pub window_order: Vec<WindowId>,
 }
 
 impl Router<'_> {
@@ -305,12 +308,20 @@ impl Router<'_> {
             font_library: Box::new(font_library),
             clipboard,
             current_tab_id: 0,
+            window_order: Vec::new(),
         }
     }
 
     #[inline]
     pub fn propagate_error_to_next_route(&mut self, error: RioError) {
         self.propagated_report = Some(error);
+    }
+
+    /// Remove a window from routes and from the window_order tracking.
+    #[inline]
+    pub fn remove_window(&mut self, id: &WindowId) {
+        self.routes.remove(id);
+        self.window_order.retain(|w| w != id);
     }
 
     #[inline]
@@ -421,7 +432,7 @@ impl Router<'_> {
         config: &'a rio_backend::config::Config,
         open_url: Option<String>,
         app_id: Option<&str>,
-    ) {
+    ) -> WindowId {
         let tab_id = if config.navigation.is_native() {
             let id = self.current_tab_id;
             self.current_tab_id = self.current_tab_id.wrapping_add(1);
@@ -455,6 +466,8 @@ impl Router<'_> {
         }
 
         self.routes.insert(id, route);
+        self.window_order.push(id);
+        id
     }
 
     #[cfg(target_os = "macos")]
