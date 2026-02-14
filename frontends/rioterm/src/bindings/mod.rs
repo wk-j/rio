@@ -1047,26 +1047,45 @@ pub fn platform_key_bindings(
     if use_navigation_key_bindings {
         key_bindings.extend(bindings!(
             KeyBinding;
-            "t", ModifiersState::CONTROL | ModifiersState::SHIFT; Action::TabCreateNew;
+            "t", ModifiersState::SUPER; Action::TabCreateNew;
             Key::Named(Tab), ModifiersState::CONTROL; Action::SelectNextTab;
             Key::Named(Tab), ModifiersState::CONTROL | ModifiersState::SHIFT; Action::SelectPrevTab;
-            "[", ModifiersState::CONTROL | ModifiersState::SHIFT; Action::SelectPrevTab;
-            "]", ModifiersState::CONTROL | ModifiersState::SHIFT; Action::SelectNextTab;
-            "w", ModifiersState::CONTROL | ModifiersState::SHIFT; Action::CloseCurrentSplitOrTab;
+            "w", ModifiersState::SUPER; Action::CloseCurrentSplitOrTab;
+            "[", ModifiersState::SUPER | ModifiersState::SHIFT; Action::SelectPrevTab;
+            "]", ModifiersState::SUPER | ModifiersState::SHIFT; Action::SelectNextTab;
+            "1", ModifiersState::SUPER; Action::SelectTab(0);
+            "2", ModifiersState::SUPER; Action::SelectTab(1);
+            "3", ModifiersState::SUPER; Action::SelectTab(2);
+            "4", ModifiersState::SUPER; Action::SelectTab(3);
+            "5", ModifiersState::SUPER; Action::SelectTab(4);
+            "6", ModifiersState::SUPER; Action::SelectTab(5);
+            "7", ModifiersState::SUPER; Action::SelectTab(6);
+            "8", ModifiersState::SUPER; Action::SelectTab(7);
+            "9", ModifiersState::SUPER; Action::SelectLastTab;
+        ));
+    }
+
+    if config_keyboard.disable_ctlseqs_alt {
+        key_bindings.extend(bindings!(
+            KeyBinding;
+            Key::Named(ArrowLeft), ModifiersState::ALT,  ~BindingMode::VI;
+                Action::Esc("\x1bb".into());
+            Key::Named(ArrowRight), ModifiersState::ALT,  ~BindingMode::VI;
+                Action::Esc("\x1bf".into());
         ));
     }
 
     if use_splits {
         key_bindings.extend(bindings!(
             KeyBinding;
-            "r", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SplitRight;
-            "d", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SplitDown;
-            "]", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SelectNextSplit;
-            "[", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SelectPrevSplit;
-            Key::Named(ArrowUp), ModifiersState::CONTROL | ModifiersState::SHIFT | ModifiersState::ALT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerUp;
-            Key::Named(ArrowDown), ModifiersState::CONTROL | ModifiersState::SHIFT | ModifiersState::ALT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerDown;
-            Key::Named(ArrowLeft), ModifiersState::CONTROL | ModifiersState::SHIFT | ModifiersState::ALT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerLeft;
-            Key::Named(ArrowRight), ModifiersState::CONTROL | ModifiersState::SHIFT | ModifiersState::ALT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerRight;
+            "d", ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SplitRight;
+            "d", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SplitDown;
+            "]", ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SelectNextSplit;
+            "[", ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::SelectPrevSplit;
+            Key::Named(ArrowUp), ModifiersState::CONTROL | ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerUp;
+            Key::Named(ArrowDown), ModifiersState::CONTROL | ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerDown;
+            Key::Named(ArrowLeft), ModifiersState::CONTROL | ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerLeft;
+            Key::Named(ArrowRight), ModifiersState::CONTROL | ModifiersState::SUPER, ~BindingMode::SEARCH, ~BindingMode::VI; Action::MoveDividerRight;
         ));
     }
 
