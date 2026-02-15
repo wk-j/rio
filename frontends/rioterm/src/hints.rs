@@ -222,17 +222,25 @@ impl HintState {
             let line_text = self.extract_line_text(term, line);
 
             // Find all matches in this line
-            for mat in regex.find_iter(&line_text) {
-                let start_col = Column(mat.start());
-                let mut match_text = mat.as_str().to_string();
+            // Use captures_iter to support capture groups: if the regex
+            // contains a capture group, the first group is used as the
+            // copied text while the full match defines the highlight range.
+            for caps in regex.captures_iter(&line_text) {
+                let full_match = caps.get(0).unwrap();
+                let start_col = Column(full_match.start());
+
+                // Use first capture group text if available, otherwise full match
+                let mut match_text =
+                    caps.get(1).unwrap_or(full_match).as_str().to_string();
 
                 // Apply post-processing if enabled
                 if hint.post_processing {
                     match_text = post_process_hyperlink_uri(&match_text);
                 }
 
-                // Calculate the correct end position based on the processed text length
-                let end_col = Column(mat.start() + match_text.len().saturating_sub(1));
+                // Highlight range is based on the full match
+                let end_col =
+                    Column(full_match.start() + full_match.len().saturating_sub(1));
 
                 let hint_match = HintMatch {
                     text: match_text,
@@ -593,5 +601,44 @@ mod tests {
             test_keys.len(),
             "Label should be completed with single character"
         );
+    }
+
+    #[test]
+    fn test_regex_multiple_matches_single_line() {
+        // Inline backtick code pattern
+        let regex = regex::Regex::new("`[^`]+`").unwrap();
+        let line = "Use `git commit` and then `git push` to publish";
+
+        let matches: Vec<&str> = regex.find_iter(line).map(|m| m.as_str()).collect();
+        assert_eq!(matches, vec!["`git commit`", "`git push`"]);
+    }
+
+    #[test]
+    fn test_regex_combined_patterns_single_line() {
+        // Combined pattern: backtick code OR quoted strings OR file paths
+        let regex =
+            regex::Regex::new(r#"`[^`]+`|"[^"]+"|/?(?:[\w.-]+/)+[\w.-]+"#).unwrap();
+
+        let line = r#"Run `cargo test` on "main.rs" at src/hints.rs"#;
+        let matches: Vec<&str> = regex.find_iter(line).map(|m| m.as_str()).collect();
+        assert_eq!(matches, vec!["`cargo test`", "\"main.rs\"", "src/hints.rs"]);
+    }
+
+    #[test]
+    fn test_regex_no_matches() {
+        let regex = regex::Regex::new("`[^`]+`").unwrap();
+        let line = "No backtick code here";
+
+        let matches: Vec<&str> = regex.find_iter(line).map(|m| m.as_str()).collect();
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_regex_adjacent_matches() {
+        let regex = regex::Regex::new("`[^`]+`").unwrap();
+        let line = "`a``b``c`";
+
+        let matches: Vec<&str> = regex.find_iter(line).map(|m| m.as_str()).collect();
+        assert_eq!(matches, vec!["`a`", "`b`", "`c`"]);
     }
 }
