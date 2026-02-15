@@ -25,7 +25,8 @@ pub struct WindowSlot {
 /// Get the available screen area for the main display.
 ///
 /// On macOS, uses `CGDisplay::main()` via Core Graphics to avoid
-/// the NSScreen enumeration crash in objc2-foundation.
+/// the NSScreen enumeration crash in objc2-foundation, then adjusts
+/// for the menu bar by subtracting a fixed offset from the top.
 /// On other platforms, uses `current_monitor()` with a fallback.
 pub fn get_available_screen_area(
     _window: &rio_window::window::Window,
@@ -33,6 +34,7 @@ pub fn get_available_screen_area(
     #[cfg(target_os = "macos")]
     {
         use core_graphics::display::CGDisplay;
+
         let main = CGDisplay::main();
         let bounds = main.bounds();
         let width = bounds.size.width as u32;
@@ -40,11 +42,16 @@ pub fn get_available_screen_area(
         if width == 0 || height == 0 {
             return None;
         }
+        // Approximate the menu bar height (25pt standard, up to 37pt on
+        // notch displays). This avoids using NSScreen which can crash
+        // during enumeration. The decoration-height logic in apply_layout
+        // handles the remaining adjustments.
+        let menu_bar_height: u32 = 25;
         Some(ScreenArea {
             x: bounds.origin.x as i32,
-            y: bounds.origin.y as i32,
+            y: bounds.origin.y as i32 + menu_bar_height as i32,
             width,
-            height,
+            height: height.saturating_sub(menu_bar_height),
         })
     }
     #[cfg(not(target_os = "macos"))]
@@ -82,10 +89,16 @@ pub fn focused_slot(
     gap: u32,
     align_width: f32,
     has_peers: bool,
+    decoration_height: u32,
 ) -> WindowSlot {
     let ratio = align_width.clamp(0.1, 1.0);
-    let w = (screen.width as f32 * ratio) as u32;
-    let h = screen.height.saturating_sub(gap * 2);
+    let usable_width = screen
+        .width
+        .saturating_sub(if has_peers { gap * 2 } else { 0 });
+    let w = (usable_width as f32 * ratio) as u32;
+    // Subtract decoration height so the outer window (content + title bar)
+    // fits within the screen area.
+    let h = screen.height.saturating_sub(gap * 2 + decoration_height);
     let x = if has_peers {
         // Left-aligned with gap
         screen.x + gap as i32
@@ -141,10 +154,26 @@ pub fn apply_layout(
         return;
     }
 
+    // Determine window decoration (title bar) height by comparing
+    // outer_size vs inner_size on any existing window. This is the
+    // height added by the OS window chrome that we must account for
+    // when positioning windows so they don't overlap.
+    let decoration_height = routes
+        .values()
+        .next()
+        .map(|route| {
+            let outer = route.window.winit_window.outer_size();
+            let inner = route.window.winit_window.inner_size();
+            // Convert physical pixels to logical points using scale factor
+            let scale = route.window.winit_window.scale_factor();
+            ((outer.height.saturating_sub(inner.height)) as f64 / scale) as u32
+        })
+        .unwrap_or(0);
+
     let has_peers = len > 1;
 
     // Position focused window (centered if alone, left-aligned if has peers)
-    let focused = focused_slot(screen, gap, align_width, has_peers);
+    let focused = focused_slot(screen, gap, align_width, has_peers, decoration_height);
     if let Some(route) = routes.get_mut(&focused_id) {
         apply_slot(route, &focused);
     }
@@ -171,13 +200,22 @@ pub fn apply_layout(
     let stack_w = (screen_right - stack_x).max(0) as u32;
     let stack_count = stack_windows.len() as u32;
 
-    // Divide height evenly among stacked windows, with gap between them
+    // Divide height evenly among stacked windows, with gap between them.
+    // Each window's outer height = decoration_height + slot_height (inner),
+    // so we must reserve space for all decoration heights too.
     let total_gaps = (stack_count.saturating_sub(1)) * gap;
-    let available_height = screen.height.saturating_sub(gap * 2 + total_gaps);
+    let total_decorations = stack_count * decoration_height;
+    let available_height = screen
+        .height
+        .saturating_sub(gap * 2 + total_gaps + total_decorations);
     let slot_height = available_height / stack_count;
 
     for (i, id) in stack_windows.iter().enumerate() {
-        let y = screen.y + gap as i32 + (i as u32 * (slot_height + gap)) as i32;
+        // Each window's outer height is (decoration_height + slot_height),
+        // so advance Y by that amount plus the gap between windows.
+        let y = screen.y
+            + gap as i32
+            + (i as u32 * (decoration_height + slot_height + gap)) as i32;
         let slot = WindowSlot {
             x: stack_x,
             y,
