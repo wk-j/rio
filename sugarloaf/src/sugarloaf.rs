@@ -445,6 +445,33 @@ impl Sugarloaf<'_> {
                     self.rich_text_brush.render(&mut self.ctx, &mut rpass);
                 }
 
+                // Vi mode background tint overlay renders on top of content
+                if let Some(vi_overlay) = self.state.vi_mode_overlay {
+                    let mut overlay_pass =
+                        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                            label: Some("vi_mode_overlay"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                depth_slice: None,
+                                view: &view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            multiview_mask: None,
+                        });
+
+                    self.quad_brush.render_single(
+                        &mut self.ctx,
+                        &vi_overlay,
+                        &mut overlay_pass,
+                    );
+                }
+
                 // Visual bell overlay requires separate render pass to appear on top of rich text
                 if let Some(bell_overlay) = self.state.visual_bell_overlay {
                     let mut overlay_pass =
@@ -503,5 +530,10 @@ impl Sugarloaf<'_> {
     #[inline]
     pub fn set_visual_bell_overlay(&mut self, overlay: Option<Quad>) {
         self.state.set_visual_bell_overlay(overlay);
+    }
+
+    #[inline]
+    pub fn set_vi_mode_overlay(&mut self, overlay: Option<Quad>) {
+        self.state.set_vi_mode_overlay(overlay);
     }
 }

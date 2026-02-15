@@ -1234,6 +1234,19 @@ impl Renderer {
         };
         sugarloaf.set_visual_bell_overlay(bell_overlay);
 
+        // Set vi mode background tint overlay
+        let vi_mode_overlay = if self.is_vi_mode_enabled {
+            Some(Quad {
+                position: [0.0, 0.0],
+                size: [window_size.width, window_size.height],
+                color: self.named_colors.vi_mode_background,
+                ..Quad::default()
+            })
+        } else {
+            None
+        };
+        sugarloaf.set_vi_mode_overlay(vi_mode_overlay);
+
         sugarloaf.set_objects(objects);
 
         // Apply background color from current context if changed

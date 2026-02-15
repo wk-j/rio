@@ -9,6 +9,15 @@ By default you can launch Vi mode by using `alt` + `shift` + `space`.
 
 ![Demo Vi mode](/assets/features/demo-vi-mode.gif)
 
+When Vi mode is active, a background tint overlay is applied to the terminal to make the mode visually obvious. You can customize the tint color and opacity via the `vi-mode-background` color option under `[colors]`:
+
+```toml
+[colors]
+vi-mode-background = '#00ff801a'
+```
+
+The default is `#12d0ff` (same as `vi-cursor`) at 10% opacity. Set it to `#00000000` (fully transparent) to disable the tint.
+
 Below you can see the list of all default key bindings related to Vi mode. If you don't like of any specified key binding you can always turn off or modify (check [key bindings documentation section](/docs/key-bindings) for more information).
 
 | Trigger                   | Action                     | Condition            |

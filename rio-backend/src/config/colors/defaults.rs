@@ -33,6 +33,15 @@ pub fn vi_cursor() -> ColorArray {
 }
 
 #[inline]
+pub fn vi_mode_background() -> ColorArray {
+    let mut color = ColorBuilder::from_hex(String::from("#00ff80"), Format::SRGB0_1)
+        .unwrap()
+        .to_arr();
+    color[3] = 0.1; // 10% opacity tint
+    color
+}
+
+#[inline]
 pub fn tabs() -> ColorArray {
     ColorBuilder::from_hex(String::from("#443d40"), Format::SRGB0_1)
         .unwrap()

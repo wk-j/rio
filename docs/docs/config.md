@@ -72,6 +72,7 @@ yellow = '#FCBA28'
 # Cursor
 cursor = '#F712FF'
 vi-cursor = '#12d0ff'
+vi-mode-background = '#00ff801a'
 
 # Navigation
 tabs = '#12B5E5'

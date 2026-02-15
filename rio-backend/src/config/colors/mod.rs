@@ -140,6 +140,12 @@ pub struct Colors {
         deserialize_with = "deserialize_to_arr"
     )]
     pub vi_cursor: ColorArray,
+    #[serde(
+        default = "defaults::vi_mode_background",
+        rename = "vi-mode-background",
+        deserialize_with = "deserialize_to_arr"
+    )]
+    pub vi_mode_background: ColorArray,
     #[serde(default = "defaults::black", deserialize_with = "deserialize_to_arr")]
     pub black: ColorArray,
     #[serde(default = "defaults::cyan", deserialize_with = "deserialize_to_arr")]
@@ -336,6 +342,7 @@ impl Default for Colors {
             cursor: defaults::cursor(),
             split: defaults::split(),
             vi_cursor: defaults::vi_cursor(),
+            vi_mode_background: defaults::vi_mode_background(),
             black: defaults::black(),
             cyan: defaults::cyan(),
             magenta: defaults::magenta(),

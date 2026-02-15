@@ -20,6 +20,7 @@ pub struct SugarState {
     pub content: Content,
     pub quads: Vec<Quad>,
     pub visual_bell_overlay: Option<Quad>,
+    pub vi_mode_overlay: Option<Quad>,
 }
 
 impl SugarState {
@@ -41,6 +42,7 @@ impl SugarState {
             rich_text_to_be_removed: vec![],
             rich_text_repaint: HashSet::default(),
             visual_bell_overlay: None,
+            vi_mode_overlay: None,
         }
     }
 
@@ -288,5 +290,10 @@ impl SugarState {
     #[inline]
     pub fn set_visual_bell_overlay(&mut self, overlay: Option<Quad>) {
         self.visual_bell_overlay = overlay;
+    }
+
+    #[inline]
+    pub fn set_vi_mode_overlay(&mut self, overlay: Option<Quad>) {
+        self.vi_mode_overlay = overlay;
     }
 }
