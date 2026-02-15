@@ -1423,13 +1423,23 @@ impl Screen<'_> {
 
         #[cfg(target_os = "macos")]
         let alt_send_esc = {
+            let mods = self.modifiers.state();
             let option_as_alt = &self.renderer.option_as_alt;
-            self.modifiers.state().alt_key()
-                && (option_as_alt == "both"
-                    || (option_as_alt == "left"
-                        && self.modifiers.lalt_state() == ModifiersKeyState::Pressed)
-                    || (option_as_alt == "right"
-                        && self.modifiers.ralt_state() == ModifiersKeyState::Pressed))
+
+            // When Ctrl+Option is pressed together, always treat Option as Alt.
+            // Ctrl+Option+letter has no useful macOS compose meaning and terminals
+            // universally expect Ctrl+Alt+letter to produce ESC + control-char.
+            let ctrl_with_alt = mods.alt_key() && mods.control_key();
+
+            ctrl_with_alt
+                || (mods.alt_key()
+                    && (option_as_alt == "both"
+                        || (option_as_alt == "left"
+                            && self.modifiers.lalt_state()
+                                == ModifiersKeyState::Pressed)
+                        || (option_as_alt == "right"
+                            && self.modifiers.ralt_state()
+                                == ModifiersKeyState::Pressed)))
         };
 
         match key.logical_key {

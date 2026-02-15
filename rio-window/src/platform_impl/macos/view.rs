@@ -1198,24 +1198,75 @@ fn mouse_button(event: &NSEvent) -> MouseButton {
     }
 }
 
+/// Apply the Ctrl key transformation to a base character.
+///
+/// When `replace_event` strips Option-composed characters via
+/// `charactersIgnoringModifiers`, it also loses the Ctrl transformation
+/// that macOS would have applied. This function re-applies it so that
+/// e.g. Ctrl+Option+P produces `\x10` (Ctrl-P) instead of `p`.
+fn apply_ctrl_transform(base: &str) -> Option<String> {
+    if base.len() != 1 {
+        return None;
+    }
+    let ch = base.as_bytes()[0];
+    let ctrl_char: Option<u8> = match ch {
+        b'a'..=b'z' => Some(ch - b'a' + 1),
+        b'A'..=b'Z' => Some(ch - b'A' + 1),
+        b'@' => Some(0x00),
+        b'[' => Some(0x1B),
+        b'\\' => Some(0x1C),
+        b']' => Some(0x1D),
+        b'^' => Some(0x1E),
+        b'_' => Some(0x1F),
+        b'?' => Some(0x7F),
+        _ => None,
+    };
+    ctrl_char.map(|c| String::from(c as char))
+}
+
 // NOTE: to get option as alt working we need to rewrite events
 // we're getting from the operating system, which makes it
 // impossible to provide such events as extra in `KeyEvent`.
 fn replace_event(event: &NSEvent, option_as_alt: OptionAsAlt) -> Retained<NSEvent> {
     let ev_mods = event_mods(event).state;
-    let ignore_alt_characters = match option_as_alt {
-        OptionAsAlt::OnlyLeft if lalt_pressed(event) => true,
-        OptionAsAlt::OnlyRight if ralt_pressed(event) => true,
-        OptionAsAlt::Both if ev_mods.alt_key() => true,
-        _ => false,
-    } && !ev_mods.control_key()
-        && !ev_mods.super_key();
+
+    // When Ctrl+Option is pressed together, always strip Option's character
+    // composition regardless of the `option-as-alt` setting.  Ctrl+Option+letter
+    // has no useful macOS compose meaning and terminals universally expect
+    // Ctrl+Alt+letter to produce ESC + control-character (e.g. \x1b\x10 for
+    // Ctrl+Alt+P).  Without this, macOS applies Ctrl to the Option-composed
+    // character (e.g. Ctrl+"π") producing garbage.
+    let ctrl_with_alt =
+        ev_mods.control_key() && ev_mods.alt_key() && !ev_mods.super_key();
+
+    let ignore_alt_characters = ctrl_with_alt
+        || (match option_as_alt {
+            OptionAsAlt::OnlyLeft if lalt_pressed(event) => true,
+            OptionAsAlt::OnlyRight if ralt_pressed(event) => true,
+            OptionAsAlt::Both if ev_mods.alt_key() => true,
+            _ => false,
+        } && !ev_mods.super_key());
 
     if ignore_alt_characters {
-        let ns_chars = unsafe {
+        let ns_chars_ignoring = unsafe {
             event
                 .charactersIgnoringModifiers()
                 .expect("expected characters to be non-null")
+        };
+
+        // When Ctrl is held, `charactersIgnoringModifiers` gives us the base
+        // character without any modifier transformations (e.g. "p").  We need
+        // to re-apply the Ctrl transformation ourselves so that
+        // `NSEvent.characters()` on the rewritten event returns the correct
+        // control character (e.g. "\x10" for Ctrl-P).
+        let ns_chars = if ev_mods.control_key() {
+            let base = ns_chars_ignoring.to_string();
+            match apply_ctrl_transform(&base) {
+                Some(ctrl) => NSString::from_str(&ctrl),
+                None => ns_chars_ignoring.copy(),
+            }
+        } else {
+            ns_chars_ignoring.copy()
         };
 
         unsafe {
@@ -1227,7 +1278,7 @@ fn replace_event(event: &NSEvent, option_as_alt: OptionAsAlt) -> Retained<NSEven
                 event.windowNumber(),
                 None,
                 &ns_chars,
-                &ns_chars,
+                &ns_chars_ignoring,
                 event.isARepeat(),
                 event.keyCode(),
             )
