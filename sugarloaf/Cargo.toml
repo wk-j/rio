@@ -56,6 +56,16 @@ futures = { workspace = true }
 
 thiserror = "2.0.1"
 librashader = { version = "0.10.0", default-features = false, features = ["runtime-wgpu", "stable", "presets"] }
+librashader-common = "0.10.0"
+librashader-presets = "0.10.0"
+librashader-preprocess = "0.10.0"
+librashader-pack = "0.10.0"
+librashader-reflect = { version = "0.10.0", features = [
+    "stable",
+    "wgsl",
+], default-features = false }
+librashader-runtime = "0.10.0"
+librashader-cache = "0.10.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = "1.10.0"
