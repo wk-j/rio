@@ -112,6 +112,10 @@ pub struct Window {
     pub align_gap: u32,
     #[serde(default = "default_align_width", rename = "align-width")]
     pub align_width: f32,
+    /// When true, window focus changes only via keyboard shortcuts (CycleWindowNext/Prev),
+    /// ignoring mouse clicks and OS-triggered focus changes for auto-align purposes.
+    #[serde(default = "bool::default", rename = "keyboard-only-focus")]
+    pub keyboard_only_focus: bool,
 }
 
 fn default_peek_width() -> u32 {
@@ -147,6 +151,7 @@ impl Default for Window {
             peek_width: default_peek_width(),
             align_gap: default_align_gap(),
             align_width: default_align_width(),
+            keyboard_only_focus: false,
         }
     }
 }

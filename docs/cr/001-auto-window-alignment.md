@@ -95,12 +95,16 @@ left: A (80%)  right stack: [B, C]
 ### Trigger Events
 
 Layout recalculates on:
-- Window gains focus (`WindowEvent::Focused(true)`)
+- Window gains focus (`WindowEvent::Focused(true)`) — unless `keyboard-only-focus` is enabled
 - New window created (`RioEvent::CreateWindow`) — new window becomes focused
 - Window closed — remaining windows redistribute
 - Config reload — re-applies layout with updated settings
 - Manual trigger (`AlignWindows` action)
 - Focus cycling (`CycleWindowNext` / `CycleWindowPrev` actions)
+
+### Keyboard-Only Focus Mode
+
+When `keyboard-only-focus = true`, the layout only changes when you use keyboard shortcuts (`CycleWindowNext` / `CycleWindowPrev`). Mouse clicks on windows will still give them OS-level focus but won't trigger the auto-align layout. This is useful when you want to interact with a stacked window (e.g., copy text) without it becoming the main focused window.
 
 ## Implementation
 
@@ -203,10 +207,11 @@ Guard: all methods early-return if `auto_align` is false in config.
 
 ```toml
 [window]
-auto-align = true       # bool, default false — enables the feature
-peek-width = 50         # u32, default 50 — reserved for future use
-align-gap = 20          # u32, default 10 — pixels between windows
-align-width = 0.8       # f32, default 1.0 — focused window width as ratio of screen (0.1–1.0)
+auto-align = true          # bool, default false — enables the feature
+peek-width = 50            # u32, default 50 — reserved for future use
+align-gap = 20             # u32, default 10 — pixels between windows
+align-width = 0.8          # f32, default 1.0 — focused window width as ratio of screen (0.1–1.0)
+keyboard-only-focus = true # bool, default false — only change layout via keyboard shortcuts, ignore mouse clicks
 ```
 
 ### 7. Platform Notes

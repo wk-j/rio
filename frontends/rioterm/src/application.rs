@@ -36,6 +36,10 @@ pub struct Application<'a> {
     router: Router<'a>,
     scheduler: Scheduler,
     app_id: Option<String>,
+    /// Tracks if the next focus change was triggered by keyboard (CycleWindowNext/Prev).
+    /// When true, the next WindowEvent::Focused(true) should trigger align_windows().
+    /// This is reset after the focus event is processed.
+    keyboard_triggered_focus: bool,
 }
 
 impl Application<'_> {
@@ -73,6 +77,7 @@ impl Application<'_> {
             router,
             scheduler,
             app_id,
+            keyboard_triggered_focus: false,
         }
     }
 
@@ -240,6 +245,10 @@ impl Application<'_> {
             Some(s) => s,
             None => return,
         };
+
+        // Mark this focus change as keyboard-triggered so WindowEvent::Focused
+        // won't trigger an additional align_windows() call.
+        self.keyboard_triggered_focus = true;
 
         let window_order = self.router.window_order.clone();
         crate::router::alignment::cycle_focus(
@@ -1451,6 +1460,19 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 // Auto-align: must return early so the route borrow is released
                 // before we call align_windows which borrows self.router mutably.
                 if has_regained_focus && self.config.window.auto_align {
+                    // If keyboard_only_focus is enabled, only align when focus was
+                    // triggered by keyboard shortcuts (CycleWindowNext/Prev).
+                    // The keyboard_triggered_focus flag is set by cycle_window_focus()
+                    // before calling focus_window(), and cycle_focus() already handles
+                    // the layout, so we skip align_windows() for keyboard-triggered focus.
+                    if self.config.window.keyboard_only_focus {
+                        if self.keyboard_triggered_focus {
+                            // Reset the flag - layout was already applied by cycle_focus()
+                            self.keyboard_triggered_focus = false;
+                        }
+                        // Skip align_windows() for mouse/OS-triggered focus changes
+                        return;
+                    }
                     // route borrow ends here due to early return
                     self.align_windows();
                     return;
