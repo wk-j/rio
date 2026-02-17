@@ -711,9 +711,20 @@ impl Screen<'_> {
             return;
         }
 
-        // Get the character pressed
+        // Get the character pressed - try multiple sources
         let text = key.text_with_all_modifiers().unwrap_or_default();
-        for character in text.chars() {
+
+        // Also check logical_key for single character keys
+        let mut chars_to_check: Vec<char> = text.chars().collect();
+        if let Key::Character(c) = &key.logical_key {
+            for ch in c.chars() {
+                if !chars_to_check.contains(&ch) {
+                    chars_to_check.push(ch);
+                }
+            }
+        }
+
+        for character in chars_to_check {
             if let Some(item) = self.leader_state.find_item(character).cloned() {
                 // Close the menu first
                 self.leader_state.close();
