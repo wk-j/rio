@@ -23,8 +23,50 @@ impl Default for Leader {
     }
 }
 
+/// Parsed leader key binding
+#[derive(Debug, Clone)]
+pub struct ParsedLeaderKey {
+    /// The key itself (e.g., "space", ";", "a")
+    pub key: String,
+    /// Whether CTRL modifier is required
+    pub ctrl: bool,
+    /// Whether ALT/OPTION modifier is required
+    pub alt: bool,
+    /// Whether SHIFT modifier is required
+    pub shift: bool,
+    /// Whether SUPER/CMD modifier is required
+    pub super_key: bool,
+}
+
+impl Leader {
+    /// Parse the leader key configuration string (e.g., "ctrl+space", "super+;")
+    /// Returns the key and modifier flags
+    pub fn parse_key(&self) -> ParsedLeaderKey {
+        let mut result = ParsedLeaderKey {
+            key: String::new(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            super_key: false,
+        };
+
+        let parts: Vec<&str> = self.key.split('+').collect();
+        for part in parts {
+            match part.trim().to_lowercase().as_str() {
+                "ctrl" | "control" => result.ctrl = true,
+                "alt" | "option" => result.alt = true,
+                "shift" => result.shift = true,
+                "super" | "cmd" | "command" => result.super_key = true,
+                key => result.key = key.to_string(),
+            }
+        }
+
+        result
+    }
+}
+
 fn default_leader_key() -> String {
-    "ctrl+space".to_string()
+    "super+;".to_string()
 }
 
 fn default_leader_items() -> Vec<LeaderItem> {

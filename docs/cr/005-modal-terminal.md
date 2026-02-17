@@ -17,7 +17,7 @@ Implement a leader key system that triggers a modal dialog popup, allowing users
 ## User Flow
 
 ```
-1. User presses leader key (Ctrl+;)
+1. User presses leader key (default: Cmd+; on macOS, configurable via [leader] key)
 2. Modal dialog appears at bottom-right with all actions
 3. User presses key to select action
 4. Action executes, modal closes
@@ -188,8 +188,9 @@ const MENU_HINT: Color = Color::rgb(127, 132, 156);       // Dimmed
 
 ```toml
 [leader]
-# Key to trigger leader menu (default: ctrl+space, but hardcoded binding uses ctrl+;)
-key = "ctrl+space"
+# Key to trigger leader menu (default: super+; which is Cmd+; on macOS)
+# Supported modifiers: ctrl, alt/option, shift, super/cmd/command
+key = "super+;"
 
 # Custom menu items
 [[leader.items]]
@@ -313,7 +314,7 @@ All existing Rio actions can be used:
 
 ### Phase 1: Core Menu System (Done)
 1. Added `LeaderMenuState` to screen state
-2. Implemented leader key detection (Ctrl+;)
+2. Implemented leader key detection (configurable, default: Cmd+;)
 3. Added basic menu data structures in `rio-backend/src/config/leader.rs`
 4. Handle menu input (key selection, Esc to close)
 
@@ -329,7 +330,7 @@ All existing Rio actions can be used:
 
 ### Phase 4: Configuration (Done)
 1. Added leader config section to Config
-2. Support custom leader key via config
+2. Support custom leader key via config (e.g., `key = "super+;"`, `key = "ctrl+space"`)
 3. Support custom menu items with `action` or `write` fields
 4. Variable expansion: `${SELECTION}`, `${WORD}`, `${LINE}`, `${CWD}`, `${FILE}`
 

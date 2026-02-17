@@ -726,8 +726,6 @@ pub fn default_key_bindings(config: &rio_backend::config::Config) -> Vec<KeyBind
             ViMotion::WordRightEnd;
         "5",   ModifiersState::SHIFT, +BindingMode::VI, ~BindingMode::SEARCH;
             ViMotion::Bracket;
-        // Leader menu (Ctrl+;)
-        ";", ModifiersState::CONTROL, ~BindingMode::VI, ~BindingMode::SEARCH; Action::ToggleLeaderMenu;
     );
 
     bindings.extend(bindings!(
@@ -760,7 +758,59 @@ pub fn default_key_bindings(config: &rio_backend::config::Config) -> Vec<KeyBind
     // Add hint bindings
     bindings.extend(create_hint_bindings(&config.hints.rules));
 
+    // Add leader key binding from config
+    if let Some(leader_binding) = create_leader_binding(&config.leader) {
+        bindings.push(leader_binding);
+    }
+
     config_key_bindings(config.bindings.keys.to_owned(), bindings)
+}
+
+/// Create leader key binding from configuration
+fn create_leader_binding(
+    leader: &rio_backend::config::leader::Leader,
+) -> Option<KeyBinding> {
+    let parsed = leader.parse_key();
+
+    if parsed.key.is_empty() {
+        return None;
+    }
+
+    // Parse the key
+    let (key, location) = match parsed.key.as_str() {
+        "space" => (Key::Named(Space), KeyLocation::Standard),
+        "enter" | "return" => (Key::Named(Enter), KeyLocation::Standard),
+        "escape" | "esc" => (Key::Named(Escape), KeyLocation::Standard),
+        "tab" => (Key::Named(Tab), KeyLocation::Standard),
+        "backspace" | "back" => (Key::Named(Backspace), KeyLocation::Standard),
+        single_char if single_char.chars().count() == 1 => {
+            (Key::Character(single_char.into()), KeyLocation::Standard)
+        }
+        _ => return None,
+    };
+
+    // Build modifiers
+    let mut mods = ModifiersState::empty();
+    if parsed.ctrl {
+        mods.insert(ModifiersState::CONTROL);
+    }
+    if parsed.alt {
+        mods.insert(ModifiersState::ALT);
+    }
+    if parsed.shift {
+        mods.insert(ModifiersState::SHIFT);
+    }
+    if parsed.super_key {
+        mods.insert(ModifiersState::SUPER);
+    }
+
+    Some(KeyBinding {
+        trigger: BindingKey::Keycode { key, location },
+        mods,
+        action: Action::ToggleLeaderMenu,
+        mode: BindingMode::empty(),
+        notmode: BindingMode::VI | BindingMode::SEARCH,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
