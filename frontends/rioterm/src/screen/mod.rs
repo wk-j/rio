@@ -260,7 +260,7 @@ impl Screen<'_> {
         Ok(Screen {
             search_state: SearchState::default(),
             hint_state: HintState::new(config.hints.alphabet.clone()),
-            leader_state: LeaderMenuState::new(config.leader.items.clone()),
+            leader_state: LeaderMenuState::new(config.leader.items()),
             hints_config: config
                 .hints
                 .rules
@@ -807,6 +807,38 @@ impl Screen<'_> {
                 self.cancel_search();
                 self.context_manager.select_prev_split();
             }
+            Act::SelectSplitLeft => {
+                self.cancel_search();
+                self.context_manager.select_split_left();
+            }
+            Act::SelectSplitRight => {
+                self.cancel_search();
+                self.context_manager.select_split_right();
+            }
+            Act::SelectSplitUp => {
+                self.cancel_search();
+                self.context_manager.select_split_up();
+            }
+            Act::SelectSplitDown => {
+                self.cancel_search();
+                self.context_manager.select_split_down();
+            }
+            Act::ToggleZoom => {
+                self.context_manager.current_grid_mut().toggle_zoom();
+            }
+            Act::ToggleQuickTerminal => {
+                let rich_text_id = self.sugarloaf.create_rich_text();
+                self.context_manager.toggle_quick_terminal(rich_text_id);
+            }
+            Act::IncreaseFontSize => {
+                self.change_font_size(FontSizeAction::Increase);
+            }
+            Act::DecreaseFontSize => {
+                self.change_font_size(FontSizeAction::Decrease);
+            }
+            Act::ResetFontSize => {
+                self.change_font_size(FontSizeAction::Reset);
+            }
             Act::AlignWindows => self.context_manager.align_windows(),
             Act::CycleWindowNext => self.context_manager.cycle_window_next(),
             Act::CycleWindowPrev => self.context_manager.cycle_window_prev(),
@@ -1310,6 +1342,26 @@ impl Screen<'_> {
                     Act::SelectPrevSplit => {
                         self.cancel_search();
                         self.context_manager.select_prev_split();
+                        self.render();
+                    }
+                    Act::SelectSplitLeft => {
+                        self.cancel_search();
+                        self.context_manager.select_split_left();
+                        self.render();
+                    }
+                    Act::SelectSplitRight => {
+                        self.cancel_search();
+                        self.context_manager.select_split_right();
+                        self.render();
+                    }
+                    Act::SelectSplitUp => {
+                        self.cancel_search();
+                        self.context_manager.select_split_up();
+                        self.render();
+                    }
+                    Act::SelectSplitDown => {
+                        self.cancel_search();
+                        self.context_manager.select_split_down();
                         self.render();
                     }
                     Act::SelectNextSplitOrTab => {

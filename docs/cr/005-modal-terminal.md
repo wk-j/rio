@@ -117,24 +117,25 @@ process_key_event()
 
 ### Default Menu Items
 
-If no `[[leader.items]]` are configured, use sensible defaults:
+Default items are always available. Custom `[[leader.items]]` in config are **merged** with defaults - items with the same key override the default action.
 
-```rust
-fn default_leader_items() -> Vec<LeaderMenuItem> {
-    vec![
-        item('n', "New window", LeaderItemAction::Action(Action::WindowCreateNew)),
-        item('t', "New tab", LeaderItemAction::Action(Action::TabCreateNew)),
-        item('x', "Close tab", LeaderItemAction::Action(Action::TabCloseCurrent)),
-        item('[', "Prev tab", LeaderItemAction::Action(Action::SelectPrevTab)),
-        item(']', "Next tab", LeaderItemAction::Action(Action::SelectNextTab)),
-        item('v', "Split down", LeaderItemAction::Action(Action::SplitDown)),
-        item('h', "Split right", LeaderItemAction::Action(Action::SplitRight)),
-        item('y', "Copy mode", LeaderItemAction::Action(Action::ToggleViMode)),
-        item('/', "Search", LeaderItemAction::Action(Action::SearchForward)),
-        item('r', "Reset", LeaderItemAction::Action(Action::ResetTerminal)),
-    ]
-}
-```
+| Key | Label | Action |
+|-----|-------|--------|
+| `n` | New window | `WindowCreateNew` |
+| `t` | New tab | `TabCreateNew` |
+| `x` | Close | `CloseCurrentSplitOrTab` |
+| `[` | Prev tab | `SelectPrevTab` |
+| `]` | Next tab | `SelectNextTab` |
+| `s` | Split right | `SplitRight` |
+| `v` | Split down | `SplitDown` |
+| `h` | Pane left | `SelectSplitLeft` |
+| `j` | Pane down | `SelectSplitDown` |
+| `k` | Pane up | `SelectSplitUp` |
+| `l` | Pane right | `SelectSplitRight` |
+| `z` | Zoom pane | `ToggleZoom` |
+| `y` | Copy mode | `ToggleViMode` |
+| `/` | Search | `SearchForward` |
+| `r` | Clear history | `ClearHistory` |
 
 ## Rendering
 

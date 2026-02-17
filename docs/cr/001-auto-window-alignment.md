@@ -52,13 +52,13 @@ The focused window sits on the left at `align-width` ratio. All unfocused window
 
 | Window Count | Focused Window | Unfocused Windows |
 |---|---|---|
-| 1 | Centered at `align-width` ratio | none |
+| 1 | No alignment (stays at user's position/size) | none |
 | 2 | Left-aligned at `align-width` ratio | 1 stacked right, full height |
 | 3 | Left-aligned at `align-width` ratio | 2 stacked right, half height each |
 | N | Left-aligned at `align-width` ratio | N-1 stacked right, height = available / (N-1) |
 
 Positioning details:
-- **Focused (1 window):** centered horizontally, `x = screen.x + (screen.width - w) / 2`
+- **Single window:** no automatic alignment — window stays at user-defined position and size
 - **Focused (2+ windows):** left-aligned, `x = screen.x + gap`
 - **Stacked:** `x = focused.x + focused.width + gap`, sharing remaining width to screen edge minus gap
 - **Stacked height:** `(screen.height - 2*gap - (N-2)*gap) / (N-1)` per window, with gap between each
@@ -249,11 +249,9 @@ Cycle next → focus A:
   |  |                                  |  |  Window C  |  |
   |  |                                  |  |  ~370px    |  |
 
-Single window (centered):
+Single window:
 
-  |        |20|      Window A (FOCUSED)     |20|        |
-  |        |  |        1638px wide          |  |        |
-  |  205px |  |        centered             |  | 205px  |
+  Window stays at user's position/size — no automatic alignment.
 ```
 
 ## Implementation Phases (Completed)

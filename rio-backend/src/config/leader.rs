@@ -2,24 +2,53 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Leader key configuration
+/// Leader key configuration (intermediate for deserialization)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Leader {
     /// Key combination to trigger the leader menu (e.g., "ctrl+space")
     #[serde(default = "default_leader_key")]
     pub key: String,
 
-    /// Menu items
-    #[serde(default = "default_leader_items")]
-    pub items: Vec<LeaderItem>,
+    /// Menu items from config (will be merged with defaults)
+    #[serde(default)]
+    items: Vec<LeaderItem>,
 }
 
 impl Default for Leader {
     fn default() -> Self {
         Self {
             key: default_leader_key(),
-            items: default_leader_items(),
+            items: Vec::new(),
         }
+    }
+}
+
+impl Leader {
+    /// Get the final list of items, merging config items with defaults.
+    /// Config items override defaults with the same key.
+    pub fn items(&self) -> Vec<LeaderItem> {
+        let defaults = default_leader_items();
+
+        if self.items.is_empty() {
+            return defaults;
+        }
+
+        // Start with defaults, then override/add from config
+        let mut result = defaults;
+
+        for config_item in &self.items {
+            // Check if this key already exists in defaults
+            if let Some(pos) = result.iter().position(|item| item.key == config_item.key)
+            {
+                // Override the default
+                result[pos] = config_item.clone();
+            } else {
+                // Add new item
+                result.push(config_item.clone());
+            }
+        }
+
+        result
     }
 }
 
@@ -71,6 +100,7 @@ fn default_leader_key() -> String {
 
 fn default_leader_items() -> Vec<LeaderItem> {
     vec![
+        // Window/Tab management
         LeaderItem {
             key: 'n',
             label: "New window".to_string(),
@@ -85,8 +115,8 @@ fn default_leader_items() -> Vec<LeaderItem> {
         },
         LeaderItem {
             key: 'x',
-            label: "Close tab".to_string(),
-            action: Some("TabCloseCurrent".to_string()),
+            label: "Close".to_string(),
+            action: Some("CloseCurrentSplitOrTab".to_string()),
             write: None,
         },
         LeaderItem {
@@ -101,18 +131,51 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SelectNextTab".to_string()),
             write: None,
         },
+        // Split creation
+        LeaderItem {
+            key: 's',
+            label: "Split right".to_string(),
+            action: Some("SplitRight".to_string()),
+            write: None,
+        },
         LeaderItem {
             key: 'v',
             label: "Split down".to_string(),
             action: Some("SplitDown".to_string()),
             write: None,
         },
+        // Pane navigation (vim-style h/j/k/l)
         LeaderItem {
             key: 'h',
-            label: "Split right".to_string(),
-            action: Some("SplitRight".to_string()),
+            label: "Pane left".to_string(),
+            action: Some("SelectSplitLeft".to_string()),
             write: None,
         },
+        LeaderItem {
+            key: 'j',
+            label: "Pane down".to_string(),
+            action: Some("SelectSplitDown".to_string()),
+            write: None,
+        },
+        LeaderItem {
+            key: 'k',
+            label: "Pane up".to_string(),
+            action: Some("SelectSplitUp".to_string()),
+            write: None,
+        },
+        LeaderItem {
+            key: 'l',
+            label: "Pane right".to_string(),
+            action: Some("SelectSplitRight".to_string()),
+            write: None,
+        },
+        LeaderItem {
+            key: 'z',
+            label: "Zoom pane".to_string(),
+            action: Some("ToggleZoom".to_string()),
+            write: None,
+        },
+        // Other
         LeaderItem {
             key: 'y',
             label: "Copy mode".to_string(),
@@ -127,8 +190,8 @@ fn default_leader_items() -> Vec<LeaderItem> {
         },
         LeaderItem {
             key: 'r',
-            label: "Reset".to_string(),
-            action: Some("ResetTerminal".to_string()),
+            label: "Clear history".to_string(),
+            action: Some("ClearHistory".to_string()),
             write: None,
         },
     ]

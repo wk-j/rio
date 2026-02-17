@@ -619,6 +619,30 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     }
 
     #[inline]
+    pub fn select_split_left(&mut self) {
+        self.contexts[self.current_index].select_split_left();
+        self.current_route = self.current().route_id;
+    }
+
+    #[inline]
+    pub fn select_split_right(&mut self) {
+        self.contexts[self.current_index].select_split_right();
+        self.current_route = self.current().route_id;
+    }
+
+    #[inline]
+    pub fn select_split_up(&mut self) {
+        self.contexts[self.current_index].select_split_up();
+        self.current_route = self.current().route_id;
+    }
+
+    #[inline]
+    pub fn select_split_down(&mut self) {
+        self.contexts[self.current_index].select_split_down();
+        self.current_route = self.current().route_id;
+    }
+
+    #[inline]
     pub fn switch_to_next_split_or_tab(&mut self) {
         if self.contexts[self.current_index].select_next_split_no_loop() {
             self.current_route = self.current().route_id;

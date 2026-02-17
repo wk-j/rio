@@ -182,8 +182,10 @@ impl Application<'_> {
 
     /// Apply focus-centered alignment layout to all windows.
     /// If `override_focused` is Some, use that as the focused window instead of querying.
+    /// Skips alignment when there's only 1 window (leaves it at user's position/size).
     fn align_windows_with(&mut self, override_focused: Option<WindowId>) {
-        if self.router.window_order.is_empty() {
+        // Skip alignment for 0 or 1 window - no need to align a single window
+        if self.router.window_order.len() < 2 {
             return;
         }
 

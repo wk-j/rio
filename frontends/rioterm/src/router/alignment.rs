@@ -81,9 +81,8 @@ pub fn get_available_screen_area(
 
 /// Position for the focused window.
 ///
-/// - With 1 window: centered at `align_width` ratio.
-/// - With 2 windows: left-aligned at `align_width` ratio.
-/// - With 3+ windows: left-aligned at `align_width` ratio.
+/// - With 1 window: no alignment (handled by caller returning early).
+/// - With 2+ windows: left-aligned at `align_width` ratio.
 pub fn focused_slot(
     screen: &ScreenArea,
     gap: u32,
@@ -150,7 +149,8 @@ pub fn apply_layout(
     align_width: f32,
 ) {
     let len = window_order.len();
-    if len == 0 {
+    // Skip alignment for 0 or 1 window - leave single window at user's position/size
+    if len < 2 {
         return;
     }
 
@@ -170,16 +170,10 @@ pub fn apply_layout(
         })
         .unwrap_or(0);
 
-    let has_peers = len > 1;
-
-    // Position focused window (centered if alone, left-aligned if has peers)
-    let focused = focused_slot(screen, gap, align_width, has_peers, decoration_height);
+    // Position focused window (left-aligned since we have multiple windows)
+    let focused = focused_slot(screen, gap, align_width, true, decoration_height);
     if let Some(route) = routes.get_mut(&focused_id) {
         apply_slot(route, &focused);
-    }
-
-    if !has_peers {
-        return;
     }
 
     // Collect unfocused windows in ring order (preserves carousel rotation)

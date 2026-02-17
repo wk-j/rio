@@ -12,6 +12,15 @@ const MIN_LINES: usize = 1;
 
 const PADDING: f32 = 2.;
 
+/// Direction for pane navigation
+#[derive(Clone, Copy, Debug)]
+enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 fn compute(
     width: f32,
     height: f32,
@@ -495,6 +504,106 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             }
         }
         false
+    }
+
+    /// Select the split pane to the left of the current one
+    #[inline]
+    pub fn select_split_left(&mut self) {
+        if let Some(target) = self.find_split_in_direction(Direction::Left) {
+            self.current = target;
+        }
+    }
+
+    /// Select the split pane to the right of the current one
+    #[inline]
+    pub fn select_split_right(&mut self) {
+        if let Some(target) = self.find_split_in_direction(Direction::Right) {
+            self.current = target;
+        }
+    }
+
+    /// Select the split pane above the current one
+    #[inline]
+    pub fn select_split_up(&mut self) {
+        if let Some(target) = self.find_split_in_direction(Direction::Up) {
+            self.current = target;
+        }
+    }
+
+    /// Select the split pane below the current one
+    #[inline]
+    pub fn select_split_down(&mut self) {
+        if let Some(target) = self.find_split_in_direction(Direction::Down) {
+            self.current = target;
+        }
+    }
+
+    /// Find the best split pane in the given direction from the current pane
+    fn find_split_in_direction(&self, direction: Direction) -> Option<usize> {
+        if self.inner.len() <= 1 {
+            return None;
+        }
+
+        let current_item = self.inner.get(&self.current)?;
+        let current_pos = current_item.position();
+        let current_width =
+            current_item.val.dimension.width / current_item.val.dimension.dimension.scale;
+        let current_height = current_item.val.dimension.height
+            / current_item.val.dimension.dimension.scale;
+
+        // Calculate center of current pane
+        let current_center_x = current_pos[0] + current_width / 2.0;
+        let current_center_y = current_pos[1] + current_height / 2.0;
+
+        let mut best_candidate: Option<(usize, f32)> = None;
+
+        for (&key, item) in &self.inner {
+            if key == self.current {
+                continue;
+            }
+
+            let pos = item.position();
+            let width = item.val.dimension.width / item.val.dimension.dimension.scale;
+            let height = item.val.dimension.height / item.val.dimension.dimension.scale;
+            let center_x = pos[0] + width / 2.0;
+            let center_y = pos[1] + height / 2.0;
+
+            // Check if this pane is in the correct direction
+            let is_valid = match direction {
+                Direction::Left => center_x < current_center_x,
+                Direction::Right => center_x > current_center_x,
+                Direction::Up => center_y < current_center_y,
+                Direction::Down => center_y > current_center_y,
+            };
+
+            if !is_valid {
+                continue;
+            }
+
+            // Calculate distance (primary axis distance + secondary axis penalty)
+            let distance = match direction {
+                Direction::Left | Direction::Right => {
+                    let dx = (center_x - current_center_x).abs();
+                    let dy = (center_y - current_center_y).abs();
+                    dx + dy * 0.5 // Penalize vertical offset
+                }
+                Direction::Up | Direction::Down => {
+                    let dx = (center_x - current_center_x).abs();
+                    let dy = (center_y - current_center_y).abs();
+                    dy + dx * 0.5 // Penalize horizontal offset
+                }
+            };
+
+            if let Some((_, best_dist)) = best_candidate {
+                if distance < best_dist {
+                    best_candidate = Some((key, distance));
+                }
+            } else {
+                best_candidate = Some((key, distance));
+            }
+        }
+
+        best_candidate.map(|(key, _)| key)
     }
 
     #[inline]
