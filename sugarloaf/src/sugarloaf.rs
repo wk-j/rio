@@ -500,6 +500,33 @@ impl Sugarloaf<'_> {
                     );
                 }
 
+                // Progress bar overlay at top of terminal
+                if let Some(progress_bar) = self.state.progress_bar {
+                    let mut overlay_pass =
+                        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                            label: Some("progress_bar"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                depth_slice: None,
+                                view: &view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            multiview_mask: None,
+                        });
+
+                    self.quad_brush.render_single(
+                        &mut self.ctx,
+                        &progress_bar,
+                        &mut overlay_pass,
+                    );
+                }
+
                 if self.graphics.bottom_layer.is_some()
                     || self.graphics.has_graphics_on_top_layer()
                 {
@@ -535,5 +562,10 @@ impl Sugarloaf<'_> {
     #[inline]
     pub fn set_vi_mode_overlay(&mut self, overlay: Option<Quad>) {
         self.state.set_vi_mode_overlay(overlay);
+    }
+
+    #[inline]
+    pub fn set_progress_bar(&mut self, progress_bar: Option<Quad>) {
+        self.state.set_progress_bar(progress_bar);
     }
 }

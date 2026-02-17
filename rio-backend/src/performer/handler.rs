@@ -1,6 +1,6 @@
 use crate::ansi::iterm2_image_protocol;
 use crate::ansi::CursorShape;
-use crate::ansi::{sixel, KeyboardModes, KeyboardModesApplyBehavior};
+use crate::ansi::{sixel, KeyboardModes, KeyboardModesApplyBehavior, ProgressState};
 use crate::batched_parser::BatchedParser;
 use crate::config::colors::{AnsiColor, ColorRgb, NamedColor};
 use crate::crosswords::pos::{CharsetIndex, Column, Line, StandardCharset};
@@ -397,6 +397,9 @@ pub trait Handler {
 
     /// Handle XTGETTCAP response.
     fn xtgettcap_response(&mut self, _response: String) {}
+
+    /// Set progress bar state from OSC 9;4.
+    fn set_progress_state(&mut self, _state: ProgressState) {}
 }
 
 pub trait Timeout: Default {
@@ -938,6 +941,30 @@ impl<U: Handler, T: Timeout> copa::Perform for Performer<'_, U, T> {
 
             // Reset text cursor color.
             b"112" => self.handler.reset_color(NamedColor::Cursor as usize),
+
+            // ConEmu OSC 9 sequences
+            // OSC 9;4;<state>;<progress> - Progress bar (ConEmu style)
+            // See: https://conemu.github.io/en/AnsiEscapeCodes.html#ConEmu_specific_OSC
+            b"9" => {
+                if params.len() >= 2 && params[1] == b"4" {
+                    // OSC 9;4 - Progress bar
+                    let state = if params.len() >= 3 {
+                        parse_number(params[2]).unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    let progress = if params.len() >= 4 {
+                        parse_number(params[3])
+                    } else {
+                        None
+                    };
+                    let progress_state = ProgressState::from_osc(state, progress);
+                    self.handler.set_progress_state(progress_state);
+                } else {
+                    // Other OSC 9 sequences (notifications, etc.) - currently unhandled
+                    unhandled(params);
+                }
+            }
 
             // OSC 1337 is not necessarily only used by iTerm2 protocol
             // OSC 1337 is equal to xterm OSC 50

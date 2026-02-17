@@ -1,3 +1,4 @@
+use rio_backend::ansi::ProgressState;
 use rio_backend::config::colors::term::TermColors;
 use rio_backend::config::CursorConfig;
 use rio_backend::crosswords::grid::row::Row;
@@ -92,6 +93,8 @@ pub struct TerminalSnapshot {
     // Cache terminal dimensions to avoid repeated calls
     pub columns: usize,
     pub screen_lines: usize,
+    /// Progress bar state from OSC 9;4
+    pub progress_state: ProgressState,
 }
 
 #[derive(Debug, Default)]

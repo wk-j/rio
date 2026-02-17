@@ -959,6 +959,7 @@ impl Renderer {
                     damage,
                     columns: terminal.columns(),
                     screen_lines: terminal.screen_lines(),
+                    progress_state: terminal.progress_state,
                 };
                 terminal.reset_damage();
                 drop(terminal);
@@ -1148,6 +1149,7 @@ impl Renderer {
                         damage: TerminalDamage::Full,
                         columns: terminal.columns(),
                         screen_lines: terminal.screen_lines(),
+                        progress_state: terminal.progress_state,
                     };
                     terminal.reset_damage();
                     drop(terminal);
@@ -1246,6 +1248,68 @@ impl Renderer {
             None
         };
         sugarloaf.set_vi_mode_overlay(vi_mode_overlay);
+
+        // Set progress bar from active terminal's progress state
+        let progress_bar = {
+            use rio_backend::ansi::ProgressState;
+            let current_context = context_manager.current_grid_mut().current_mut();
+            let terminal = current_context.terminal.lock();
+            let progress_state = terminal.progress_state;
+            drop(terminal);
+
+            if progress_state.is_visible() {
+                const PROGRESS_BAR_HEIGHT: f32 = 3.0;
+                let progress_ratio = match progress_state {
+                    ProgressState::Normal { progress } => progress as f32 / 100.0,
+                    ProgressState::Error { progress } => progress as f32 / 100.0,
+                    ProgressState::Warning { progress } => progress as f32 / 100.0,
+                    ProgressState::Indeterminate => {
+                        // For indeterminate, show a pulsing segment
+                        // Use time-based animation
+                        let time = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs_f32();
+                        let cycle = (time * 2.0) % 2.0;
+                        if cycle < 1.0 {
+                            cycle
+                        } else {
+                            2.0 - cycle
+                        }
+                    }
+                    ProgressState::Hidden => 0.0,
+                };
+
+                let color = match progress_state {
+                    ProgressState::Normal { .. } | ProgressState::Indeterminate => {
+                        [0.2, 0.6, 1.0, 1.0] // Blue
+                    }
+                    ProgressState::Error { .. } => [1.0, 0.3, 0.3, 1.0], // Red
+                    ProgressState::Warning { .. } => [1.0, 0.8, 0.2, 1.0], // Yellow
+                    ProgressState::Hidden => [0.0, 0.0, 0.0, 0.0],
+                };
+
+                let (x, width) = if matches!(progress_state, ProgressState::Indeterminate)
+                {
+                    // For indeterminate, show a moving segment
+                    let segment_width = window_size.width * 0.3;
+                    let x = progress_ratio * (window_size.width - segment_width);
+                    (x, segment_width)
+                } else {
+                    (0.0, window_size.width * progress_ratio)
+                };
+
+                Some(Quad {
+                    position: [x, 0.0],
+                    size: [width, PROGRESS_BAR_HEIGHT],
+                    color,
+                    ..Quad::default()
+                })
+            } else {
+                None
+            }
+        };
+        sugarloaf.set_progress_bar(progress_bar);
 
         sugarloaf.set_objects(objects);
 

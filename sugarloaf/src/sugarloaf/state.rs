@@ -21,6 +21,8 @@ pub struct SugarState {
     pub quads: Vec<Quad>,
     pub visual_bell_overlay: Option<Quad>,
     pub vi_mode_overlay: Option<Quad>,
+    /// Progress bar overlay (rendered at top of terminal)
+    pub progress_bar: Option<Quad>,
 }
 
 impl SugarState {
@@ -43,6 +45,7 @@ impl SugarState {
             rich_text_repaint: HashSet::default(),
             visual_bell_overlay: None,
             vi_mode_overlay: None,
+            progress_bar: None,
         }
     }
 
@@ -295,5 +298,10 @@ impl SugarState {
     #[inline]
     pub fn set_vi_mode_overlay(&mut self, overlay: Option<Quad>) {
         self.vi_mode_overlay = overlay;
+    }
+
+    #[inline]
+    pub fn set_progress_bar(&mut self, progress_bar: Option<Quad>) {
+        self.progress_bar = progress_bar;
     }
 }

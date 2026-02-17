@@ -111,3 +111,62 @@ pub enum KeyboardModesApplyBehavior {
     /// Remove the given flags from the active ones.
     Difference,
 }
+
+/// Progress bar state from ConEmu OSC 9;4 sequence.
+///
+/// See: <https://conemu.github.io/en/AnsiEscapeCodes.html#ConEmu_specific_OSC>
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProgressState {
+    /// Progress bar is hidden (state 0)
+    #[default]
+    Hidden,
+    /// Normal progress (state 1) - blue progress bar
+    Normal {
+        /// Progress value 0-100
+        progress: u8,
+    },
+    /// Error state (state 2) - red progress bar
+    Error {
+        /// Progress value 0-100
+        progress: u8,
+    },
+    /// Indeterminate/pulsing progress (state 3)
+    Indeterminate,
+    /// Warning state (state 4) - yellow progress bar
+    Warning {
+        /// Progress value 0-100
+        progress: u8,
+    },
+}
+
+impl ProgressState {
+    /// Returns true if the progress bar should be visible
+    #[inline]
+    pub fn is_visible(&self) -> bool {
+        !matches!(self, ProgressState::Hidden)
+    }
+
+    /// Returns the progress value if applicable (0-100)
+    #[inline]
+    pub fn progress_value(&self) -> Option<u8> {
+        match self {
+            ProgressState::Normal { progress }
+            | ProgressState::Error { progress }
+            | ProgressState::Warning { progress } => Some(*progress),
+            ProgressState::Hidden | ProgressState::Indeterminate => None,
+        }
+    }
+
+    /// Parse from OSC 9;4 state and progress values
+    pub fn from_osc(state: u8, progress: Option<u8>) -> Self {
+        let progress = progress.map(|p| p.min(100)).unwrap_or(0);
+        match state {
+            0 => ProgressState::Hidden,
+            1 => ProgressState::Normal { progress },
+            2 => ProgressState::Error { progress },
+            3 => ProgressState::Indeterminate,
+            4 => ProgressState::Warning { progress },
+            _ => ProgressState::Hidden,
+        }
+    }
+}

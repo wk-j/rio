@@ -31,7 +31,7 @@ use crate::ansi::mode::PrivateMode;
 use crate::ansi::sixel;
 use crate::ansi::{
     mode::Mode as AnsiMode, ClearMode, CursorShape, KeyboardModes,
-    KeyboardModesApplyBehavior, LineClearMode, TabulationClearMode,
+    KeyboardModesApplyBehavior, LineClearMode, ProgressState, TabulationClearMode,
 };
 use crate::clipboard::ClipboardType;
 use crate::config::colors::{self, AnsiColor, ColorRgb};
@@ -433,6 +433,9 @@ where
     keyboard_mode_idx: usize,
     inactive_keyboard_mode_stack: [u8; KEYBOARD_MODE_STACK_MAX_DEPTH],
     inactive_keyboard_mode_idx: usize,
+
+    /// Progress bar state from OSC 9;4 sequence
+    pub progress_state: ProgressState,
 }
 
 impl<U: EventListener> Crosswords<U> {
@@ -484,6 +487,7 @@ impl<U: EventListener> Crosswords<U> {
             keyboard_mode_idx: 0,
             inactive_keyboard_mode_stack: Default::default(),
             inactive_keyboard_mode_idx: 0,
+            progress_state: ProgressState::default(),
         }
     }
 
@@ -2996,6 +3000,16 @@ impl<U: EventListener> Handler for Crosswords<U> {
     fn xtgettcap_response(&mut self, response: String) {
         self.event_proxy
             .send_event(RioEvent::PtyWrite(response), self.window_id);
+    }
+
+    #[inline]
+    fn set_progress_state(&mut self, state: ProgressState) {
+        if self.progress_state != state {
+            self.progress_state = state;
+            // Trigger a render to update the progress bar
+            self.event_proxy
+                .send_event(RioEvent::RenderRoute(self.route_id), self.window_id);
+        }
     }
 }
 
