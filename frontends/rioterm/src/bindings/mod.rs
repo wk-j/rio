@@ -726,8 +726,8 @@ pub fn default_key_bindings(config: &rio_backend::config::Config) -> Vec<KeyBind
             ViMotion::WordRightEnd;
         "5",   ModifiersState::SHIFT, +BindingMode::VI, ~BindingMode::SEARCH;
             ViMotion::Bracket;
-        // Leader menu
-        Key::Named(Space), ModifiersState::CONTROL, ~BindingMode::VI, ~BindingMode::SEARCH; Action::ToggleLeaderMenu;
+        // Leader menu (Ctrl+;)
+        ";", ModifiersState::CONTROL, ~BindingMode::VI, ~BindingMode::SEARCH; Action::ToggleLeaderMenu;
     );
 
     bindings.extend(bindings!(

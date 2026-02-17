@@ -15,21 +15,17 @@ pub fn draw_leader_menu(
     let scaled_width = width / scale;
     let scaled_height = height / scale;
 
-    // Menu dimensions
-    let menu_width = 400.0_f32.min(scaled_width - 40.0);
-    let menu_height = 300.0_f32.min(scaled_height - 40.0);
+    // Menu dimensions - auto-size based on items
+    let item_height = 20.0;
+    let padding = 16.0;
+    let menu_width = 220.0_f32.min(scaled_width - 20.0);
+    let menu_height =
+        (items.len() as f32 * item_height + padding * 4.0).min(scaled_height - 20.0);
 
-    // Center the menu
-    let menu_x = (scaled_width - menu_width) / 2.0;
-    let menu_y = (scaled_height - menu_height) / 2.0;
-
-    // Semi-transparent background overlay
-    objects.push(Object::Quad(Quad {
-        position: [0.0, 0.0],
-        color: [0.0, 0.0, 0.0, 0.5],
-        size: [scaled_width, scaled_height],
-        ..Quad::default()
-    }));
+    // Position at bottom-right with margin
+    let margin = 10.0;
+    let menu_x = scaled_width - menu_width - margin;
+    let menu_y = scaled_height - menu_height - margin;
 
     // Menu background
     objects.push(Object::Quad(Quad {
