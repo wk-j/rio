@@ -136,9 +136,9 @@ impl HintState {
         // Get visible labels (labels filtered by keys pressed so far)
         let visible_labels = self.visible_labels();
 
-        // Find the last label starting with the input character
-        let mut matching_labels = visible_labels.iter().rev();
-        let (index, remaining_label) = matching_labels
+        // Find a label starting with the input character
+        let (index, remaining_label) = visible_labels
+            .iter()
             .find(|(_, remaining)| !remaining.is_empty() && remaining[0] == c)?;
 
         // Check if this completes the label (only one character remaining)
@@ -332,58 +332,50 @@ impl HintState {
 
     fn generate_labels(&mut self) {
         self.labels.clear();
-        let mut generator = LabelGenerator::new(&self.alphabet);
+        let count = self.matches.len();
+        let alphabet: Vec<char> = self.alphabet.chars().collect();
+        let alphabet_len = alphabet.len();
 
-        for _ in 0..self.matches.len() {
-            self.labels.push(generator.next());
+        if count == 0 {
+            return;
         }
-    }
-}
 
-/// Generates hint labels using the specified alphabet
-struct LabelGenerator {
-    alphabet: Vec<char>,
-    indices: Vec<usize>,
-}
-
-impl LabelGenerator {
-    fn new(alphabet: &str) -> Self {
-        Self {
-            alphabet: alphabet.chars().collect(),
-            indices: vec![0],
-        }
-    }
-
-    fn next(&mut self) -> Vec<char> {
-        let label = self.current_label();
-        self.increment();
-        label
-    }
-
-    fn current_label(&self) -> Vec<char> {
-        self.indices
-            .iter()
-            .rev()
-            .map(|&i| self.alphabet[i])
-            .collect()
-    }
-
-    fn increment(&mut self) {
-        let mut carry = true;
-        let mut pos = 0;
-
-        while carry && pos < self.indices.len() {
-            self.indices[pos] += 1;
-            if self.indices[pos] >= self.alphabet.len() {
-                self.indices[pos] = 0;
-                pos += 1;
-            } else {
-                carry = false;
+        // Determine the minimum label length needed to have unique, non-prefix labels
+        // We need labels where no label is a prefix of another
+        // This means all labels must have the same length
+        let label_len = if count <= alphabet_len {
+            1
+        } else {
+            // Calculate minimum length needed: alphabet_len^length >= count
+            let mut len = 2;
+            let mut capacity = alphabet_len * alphabet_len;
+            while capacity < count {
+                len += 1;
+                capacity *= alphabet_len;
             }
-        }
+            len
+        };
 
-        if carry {
-            self.indices.push(0);
+        // Generate labels of fixed length
+        let mut indices = vec![0usize; label_len];
+
+        for _ in 0..count {
+            // Create label from current indices
+            let label: Vec<char> = indices.iter().map(|&i| alphabet[i]).collect();
+            self.labels.push(label);
+
+            // Increment indices (like counting in base alphabet_len)
+            let mut carry = true;
+            for idx in indices.iter_mut().rev() {
+                if carry {
+                    *idx += 1;
+                    if *idx >= alphabet_len {
+                        *idx = 0;
+                    } else {
+                        carry = false;
+                    }
+                }
+            }
         }
     }
 }
@@ -445,15 +437,91 @@ mod tests {
     use rio_backend::config::hints::{HintAction, HintInternalAction};
 
     #[test]
-    fn test_label_generator() {
-        let mut gen = LabelGenerator::new("abc");
-        assert_eq!(gen.next(), vec!['a']);
-        assert_eq!(gen.next(), vec!['b']);
-        assert_eq!(gen.next(), vec!['c']);
-        assert_eq!(gen.next(), vec!['a', 'a']);
-        assert_eq!(gen.next(), vec!['a', 'b']);
-        assert_eq!(gen.next(), vec!['a', 'c']);
-        assert_eq!(gen.next(), vec!['b', 'a']);
+    fn test_label_generation() {
+        let mut state = HintState::new("abc".to_string());
+
+        // With 3 matches (fits in single char alphabet of 3)
+        state.matches = vec![
+            HintMatch {
+                text: "m1".to_string(),
+                start: Pos::new(Line(0), Column(0)),
+                end: Pos::new(Line(0), Column(1)),
+                hint: Rc::new(Hint {
+                    regex: None,
+                    hyperlinks: false,
+                    post_processing: false,
+                    persist: false,
+                    action: HintAction::Action {
+                        action: HintInternalAction::Copy,
+                    },
+                    mouse: Default::default(),
+                    binding: None,
+                }),
+            },
+            HintMatch {
+                text: "m2".to_string(),
+                start: Pos::new(Line(0), Column(5)),
+                end: Pos::new(Line(0), Column(6)),
+                hint: Rc::new(Hint {
+                    regex: None,
+                    hyperlinks: false,
+                    post_processing: false,
+                    persist: false,
+                    action: HintAction::Action {
+                        action: HintInternalAction::Copy,
+                    },
+                    mouse: Default::default(),
+                    binding: None,
+                }),
+            },
+            HintMatch {
+                text: "m3".to_string(),
+                start: Pos::new(Line(0), Column(10)),
+                end: Pos::new(Line(0), Column(11)),
+                hint: Rc::new(Hint {
+                    regex: None,
+                    hyperlinks: false,
+                    post_processing: false,
+                    persist: false,
+                    action: HintAction::Action {
+                        action: HintInternalAction::Copy,
+                    },
+                    mouse: Default::default(),
+                    binding: None,
+                }),
+            },
+        ];
+        state.generate_labels();
+        // 3 matches with alphabet "abc" (len 3) -> single char labels
+        assert_eq!(state.labels.len(), 3);
+        assert_eq!(state.labels[0], vec!['a']);
+        assert_eq!(state.labels[1], vec!['b']);
+        assert_eq!(state.labels[2], vec!['c']);
+
+        // With 4 matches (exceeds alphabet size) -> 2 char labels
+        state.matches.push(HintMatch {
+            text: "m4".to_string(),
+            start: Pos::new(Line(0), Column(15)),
+            end: Pos::new(Line(0), Column(16)),
+            hint: Rc::new(Hint {
+                regex: None,
+                hyperlinks: false,
+                post_processing: false,
+                persist: false,
+                action: HintAction::Action {
+                    action: HintInternalAction::Copy,
+                },
+                mouse: Default::default(),
+                binding: None,
+            }),
+        });
+        state.generate_labels();
+        // 4 matches with alphabet "abc" (len 3) -> need 2 char labels (3^2 = 9 >= 4)
+        assert_eq!(state.labels.len(), 4);
+        assert_eq!(state.labels[0], vec!['a', 'a']);
+        assert_eq!(state.labels[1], vec!['a', 'b']);
+        assert_eq!(state.labels[2], vec!['a', 'c']);
+        assert_eq!(state.labels[3], vec!['b', 'a']);
     }
 
     #[test]
