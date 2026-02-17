@@ -1,5 +1,6 @@
 mod char_cache;
 mod font_cache;
+mod leader;
 pub mod navigation;
 mod search;
 pub mod utils;
@@ -39,6 +40,13 @@ pub struct Search {
     active_search: Option<String>,
 }
 
+#[derive(Default)]
+pub struct LeaderMenu {
+    rich_text_id: Option<usize>,
+    active: bool,
+    items: Vec<rio_backend::config::leader::LeaderItem>,
+}
+
 pub struct Renderer {
     is_vi_mode_enabled: bool,
     is_game_mode_enabled: bool,
@@ -53,6 +61,7 @@ pub struct Renderer {
     pub config_blinking_interval: u64,
     ignore_selection_fg_color: bool,
     pub search: Search,
+    pub leader_menu: LeaderMenu,
     #[allow(unused)]
     pub option_as_alt: String,
     #[allow(unused)]
@@ -118,6 +127,7 @@ impl Renderer {
             visual_bell_active: false,
             visual_bell_start: None,
             search: Search::default(),
+            leader_menu: LeaderMenu::default(),
             font_cache: FontCache::new(),
             font_context: font_context.clone(),
             char_cache: CharCache::new(),
@@ -133,6 +143,16 @@ impl Renderer {
     #[inline]
     pub fn set_active_search(&mut self, active_search: Option<String>) {
         self.search.active_search = active_search;
+    }
+
+    #[inline]
+    pub fn set_leader_menu(
+        &mut self,
+        active: bool,
+        items: Vec<rio_backend::config::leader::LeaderItem>,
+    ) {
+        self.leader_menu.active = active;
+        self.leader_menu.items = items;
     }
 
     #[inline]
@@ -1213,6 +1233,37 @@ impl Renderer {
 
             self.search.active_search = None;
             self.search.rich_text_id = None;
+        }
+
+        // Leader menu overlay
+        if self.leader_menu.active {
+            // Create rich text for leader menu if needed
+            if self.leader_menu.rich_text_id.is_none() {
+                let leader_rich_text = sugarloaf.create_temp_rich_text();
+                sugarloaf.set_rich_text_font_size(&leader_rich_text, 14.0);
+                self.leader_menu.rich_text_id = Some(leader_rich_text);
+            }
+
+            if let Some(rich_text_id) = self.leader_menu.rich_text_id {
+                // Update rich text content
+                let content = sugarloaf.content();
+                content.sel(rich_text_id);
+                content.clear();
+                let menu_text = leader::format_leader_items(&self.leader_menu.items);
+                content.add_text(&menu_text, FragmentStyle::default());
+                content.build();
+
+                leader::draw_leader_menu(
+                    &mut objects,
+                    rich_text_id,
+                    &self.named_colors,
+                    &self.leader_menu.items,
+                    (window_size.width, window_size.height, scale_factor),
+                );
+            }
+        } else {
+            // Clean up rich text when menu is closed
+            self.leader_menu.rich_text_id = None;
         }
 
         // let _duration = start.elapsed();

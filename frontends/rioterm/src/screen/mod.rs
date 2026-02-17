@@ -7,6 +7,7 @@
 // which is licensed under Apache 2.0 license.
 
 pub mod hint;
+pub mod leader;
 pub mod touch;
 
 use crate::bindings::kitty_keyboard::build_key_sequence;
@@ -33,6 +34,7 @@ use crate::renderer::{
     Renderer,
 };
 use crate::screen::hint::HintMatches;
+use crate::screen::leader::LeaderMenuState;
 use crate::selection::{Selection, SelectionType};
 use core::fmt::Debug;
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
@@ -82,6 +84,7 @@ pub struct Screen<'screen> {
     pub touchpurpose: TouchPurpose,
     pub search_state: SearchState,
     pub hint_state: HintState,
+    pub leader_state: LeaderMenuState,
     pub renderer: Renderer,
     pub sugarloaf: Sugarloaf<'screen>,
     pub context_manager: context::ContextManager<EventProxy>,
@@ -257,6 +260,7 @@ impl Screen<'_> {
         Ok(Screen {
             search_state: SearchState::default(),
             hint_state: HintState::new(config.hints.alphabet.clone()),
+            leader_state: LeaderMenuState::new(config.leader.items.clone()),
             hints_config: config
                 .hints
                 .rules
@@ -590,6 +594,12 @@ impl Screen<'_> {
             return;
         }
 
+        // All key bindings are disabled while leader menu is active
+        if self.leader_state.active {
+            self.handle_leader_input(key);
+            return;
+        }
+
         // All key bindings are disabled while a hint is being selected (like Alacritty)
         if self.hint_state.is_active() {
             // Handle special keys first
@@ -685,6 +695,146 @@ impl Screen<'_> {
 
             self.ctx_mut().current_mut().messenger.send_write(bytes);
         }
+    }
+
+    /// Handle input while leader menu is active
+    fn handle_leader_input(&mut self, key: &rio_window::event::KeyEvent) {
+        // Only handle key press, not release
+        if key.state != ElementState::Pressed {
+            return;
+        }
+
+        // Handle Escape to close menu
+        if key.logical_key == Key::Named(NamedKey::Escape) {
+            self.leader_state.close();
+            self.render();
+            return;
+        }
+
+        // Get the character pressed
+        let text = key.text_with_all_modifiers().unwrap_or_default();
+        for character in text.chars() {
+            if let Some(item) = self.leader_state.find_item(character).cloned() {
+                // Close the menu first
+                self.leader_state.close();
+
+                // Execute the action
+                if let Some(action_str) = &item.action {
+                    let action = LeaderMenuState::parse_action(action_str);
+                    self.execute_leader_action(action);
+                } else if let Some(write_str) = &item.write {
+                    // Expand variables and write to PTY
+                    let expanded = self.expand_leader_variables(write_str);
+                    self.ctx_mut()
+                        .current_mut()
+                        .messenger
+                        .send_write(expanded.into_bytes());
+                }
+
+                self.render();
+                return;
+            }
+        }
+
+        // Any other key closes the menu without action
+        self.leader_state.close();
+        self.render();
+    }
+
+    /// Execute an action from the leader menu
+    fn execute_leader_action(&mut self, action: Act) {
+        match action {
+            Act::WindowCreateNew => self.context_manager.create_new_window(),
+            Act::TabCreateNew => self.create_tab(),
+            Act::TabCloseCurrent => self.close_tab(),
+            Act::SelectNextTab => {
+                self.cancel_search();
+                self.clear_selection();
+                self.context_manager.switch_to_next();
+            }
+            Act::SelectPrevTab => {
+                self.cancel_search();
+                self.clear_selection();
+                self.context_manager.switch_to_prev();
+            }
+            Act::SplitRight => self.split_right(),
+            Act::SplitDown => self.split_down(),
+            Act::ToggleViMode => {
+                let context = self.context_manager.current_mut();
+                let mut terminal = context.terminal.lock();
+                terminal.toggle_vi_mode();
+                let has_vi_mode_enabled = terminal.mode().contains(Mode::VI);
+                drop(terminal);
+                self.renderer.set_vi_mode(has_vi_mode_enabled);
+            }
+            Act::SearchForward => {
+                self.start_search(Direction::Right);
+                self.resize_top_or_bottom_line(self.ctx().len());
+            }
+            Act::SearchBackward => {
+                self.start_search(Direction::Left);
+                self.resize_top_or_bottom_line(self.ctx().len());
+            }
+            Act::Quit => self.context_manager.quit(),
+            Act::Copy => self.copy_selection(ClipboardType::Clipboard),
+            Act::Paste => {
+                let content = self.clipboard.borrow_mut().get(ClipboardType::Clipboard);
+                self.paste(&content, true);
+            }
+            Act::ClearHistory => {
+                let mut terminal = self.context_manager.current_mut().terminal.lock();
+                terminal.clear_saved_history();
+            }
+            Act::ToggleFullscreen => self.context_manager.toggle_full_screen(),
+            Act::ConfigEditor => self.context_manager.switch_to_settings(),
+            Act::CloseCurrentSplitOrTab => self.close_split_or_tab(),
+            Act::SelectNextSplit => {
+                self.cancel_search();
+                self.context_manager.select_next_split();
+            }
+            Act::SelectPrevSplit => {
+                self.cancel_search();
+                self.context_manager.select_prev_split();
+            }
+            Act::AlignWindows => self.context_manager.align_windows(),
+            Act::CycleWindowNext => self.context_manager.cycle_window_next(),
+            Act::CycleWindowPrev => self.context_manager.cycle_window_prev(),
+            _ => {}
+        }
+    }
+
+    /// Expand variables in leader menu write strings
+    fn expand_leader_variables(&self, input: &str) -> String {
+        let mut result = input.to_string();
+
+        // Get selection if any
+        let selection = {
+            let terminal = self.context_manager.current().terminal.lock();
+            if let Some(selection) = &terminal.selection {
+                let range = selection.to_range(&terminal);
+                if let Some(range) = range {
+                    Some(terminal.bounds_to_string(range.start, range.end))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(sel) = selection {
+            result = result.replace("${SELECTION}", &sel);
+        } else {
+            result = result.replace("${SELECTION}", "");
+        }
+
+        // For now, other variables are empty - can be implemented later
+        result = result.replace("${WORD}", "");
+        result = result.replace("${LINE}", "");
+        result = result.replace("${CWD}", "");
+        result = result.replace("${FILE}", "");
+
+        result
     }
 
     /// Check whether we should try to build escape sequence for the [`KeyEvent`].
@@ -1195,6 +1345,10 @@ impl Screen<'_> {
                         self.cancel_search();
                         self.clear_selection();
                         self.context_manager.switch_to_prev();
+                        self.render();
+                    }
+                    Act::ToggleLeaderMenu => {
+                        self.leader_state.toggle();
                         self.render();
                     }
                     Act::ReceiveChar | Act::None => (),
@@ -2590,6 +2744,11 @@ impl Screen<'_> {
 
     pub fn render(&mut self) -> Option<crate::context::renderable::WindowUpdate> {
         // let screen_render_start = std::time::Instant::now();
+
+        // Update leader menu state in renderer
+        self.renderer
+            .set_leader_menu(self.leader_state.active, self.leader_state.items.clone());
+
         let is_search_active = self.search_active();
         if is_search_active {
             if let Some(history_index) = self.search_state.history_index {

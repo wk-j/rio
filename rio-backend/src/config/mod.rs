@@ -4,6 +4,7 @@ pub mod colors;
 pub mod defaults;
 pub mod hints;
 pub mod keyboard;
+pub mod leader;
 pub mod navigation;
 pub mod platform;
 pub mod renderer;
@@ -17,6 +18,7 @@ use crate::config::bindings::Bindings;
 use crate::config::defaults::*;
 use crate::config::hints::Hints;
 use crate::config::keyboard::Keyboard;
+use crate::config::leader::Leader;
 use crate::config::navigation::Navigation;
 use crate::config::platform::{Platform, PlatformConfig};
 use crate::config::renderer::Renderer;
@@ -153,6 +155,8 @@ pub struct Config {
     pub hints: Hints,
     #[serde(default = "Bell::default")]
     pub bell: Bell,
+    #[serde(default = "Leader::default")]
+    pub leader: Leader,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -623,6 +627,7 @@ impl Default for Config {
             draw_bold_text_with_light_colors: false,
             hints: Hints::default(),
             bell: Bell::default(),
+            leader: Leader::default(),
         }
     }
 }

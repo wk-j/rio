@@ -269,6 +269,7 @@ impl From<String> for Action {
             "alignwindows" => Some(Action::AlignWindows),
             "togglevimode" => Some(Action::ToggleViMode),
             "togglefullscreen" => Some(Action::ToggleFullscreen),
+            "toggleleadermenu" => Some(Action::ToggleLeaderMenu),
             "none" => Some(Action::None),
             _ => None,
         };
@@ -520,6 +521,9 @@ pub enum Action {
     /// Allow receiving char input.
     ReceiveChar,
 
+    /// Toggle leader menu
+    ToggleLeaderMenu,
+
     /// No action.
     None,
 }
@@ -722,6 +726,8 @@ pub fn default_key_bindings(config: &rio_backend::config::Config) -> Vec<KeyBind
             ViMotion::WordRightEnd;
         "5",   ModifiersState::SHIFT, +BindingMode::VI, ~BindingMode::SEARCH;
             ViMotion::Bracket;
+        // Leader menu
+        Key::Named(Space), ModifiersState::CONTROL, ~BindingMode::VI, ~BindingMode::SEARCH; Action::ToggleLeaderMenu;
     );
 
     bindings.extend(bindings!(

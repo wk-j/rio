@@ -1,6 +1,6 @@
 # CR-005: Leader Key Modal Dialog
 
-**Status:** Proposal
+**Status:** Implemented
 **Date:** 2026-02-17
 **Author:** wk
 
@@ -65,7 +65,18 @@ pub enum LeaderItemAction {
     /// Execute a built-in Rio action
     Action(Action),
     /// Write text directly to PTY (as if user typed it)
+    /// Supports variable substitution: ${SELECTION}, ${WORD}, ${LINE}, ${CWD}, ${FILE}
     Write(String),
+}
+
+/// Expand variables in write string
+fn expand_variables(input: &str, ctx: &TerminalContext) -> String {
+    input
+        .replace("${SELECTION}", &ctx.selection().unwrap_or_default())
+        .replace("${WORD}", &ctx.word_under_cursor().unwrap_or_default())
+        .replace("${LINE}", &ctx.current_line().unwrap_or_default())
+        .replace("${CWD}", &ctx.cwd().unwrap_or_default())
+        .replace("${FILE}", &ctx.file_under_cursor().unwrap_or_default())
 }
 
 /// State of the leader menu
@@ -252,6 +263,46 @@ Each menu item supports one of two action types:
 
 Note: Include `\n` at the end of `write` to execute the command.
 
+### Variables
+
+Variables can be used in `write` values using `${VAR}` syntax:
+
+| Variable | Description |
+|----------|-------------|
+| `${SELECTION}` | Currently selected text |
+| `${WORD}` | Word under cursor |
+| `${LINE}` | Current line content |
+| `${CWD}` | Current working directory |
+| `${FILE}` | Detected file path under cursor |
+
+#### Examples
+
+```toml
+# Open selected text in editor
+[[leader.items]]
+key = "o"
+label = "Open selection"
+write = "$EDITOR ${SELECTION}\n"
+
+# Git blame current file
+[[leader.items]]
+key = "b"
+label = "Git blame"
+write = "git blame ${FILE}\n"
+
+# CD to parent directory
+[[leader.items]]
+key = "u"
+label = "Go up"
+write = "cd ${CWD}/..\n"
+
+# Search word in project
+[[leader.items]]
+key = "s"
+label = "Search word"
+write = "rg ${WORD}\n"
+```
+
 ### Available Actions
 
 All existing Rio actions can be used:
@@ -268,35 +319,38 @@ All existing Rio actions can be used:
 
 ## Implementation Phases
 
-### Phase 1: Core Menu System
-1. Add `LeaderMenuState` to screen state
-2. Implement leader key detection
-3. Add basic menu data structures
+### Phase 1: Core Menu System (Done)
+1. Added `LeaderMenuState` to screen state
+2. Implemented leader key detection (Ctrl+Space)
+3. Added basic menu data structures in `rio-backend/src/config/leader.rs`
 4. Handle menu input (key selection, Esc to close)
 
-### Phase 2: Rendering
-1. Create menu overlay renderer in sugarloaf
-2. Draw menu panel with items in 2-column layout
-3. Style with semi-transparent background
+### Phase 2: Rendering (Done)
+1. Created menu overlay renderer in `frontends/rioterm/src/renderer/leader.rs`
+2. Draw menu panel with items
+3. Semi-transparent background overlay
 
-### Phase 3: Actions
-1. Connect menu items to existing Actions
-2. Integrate with existing vi-mode and search
-3. Support shell command execution
+### Phase 3: Actions (Done)
+1. Connected menu items to existing Actions
+2. Integrated with existing vi-mode and search
+3. Support PTY write (shell commands via `write` field)
 
-### Phase 4: Configuration
-1. Add leader config section
-2. Support custom leader key
-3. Support custom menu items
+### Phase 4: Configuration (Done)
+1. Added leader config section to Config
+2. Support custom leader key via config
+3. Support custom menu items with `action` or `write` fields
+4. Variable expansion: `${SELECTION}`, `${WORD}`, `${LINE}`, `${CWD}`, `${FILE}`
 
-## Files to Modify
+## Files Modified
 
 | File | Changes |
 |------|---------|
-| `frontends/rioterm/src/screen/mod.rs` | Add LeaderMenuState, input handling |
-| `frontends/rioterm/src/screen/leader.rs` | New: menu logic and default items |
-| `sugarloaf/` | Add overlay panel rendering |
-| `rio-backend/src/config/leader.rs` | New: leader config |
+| `frontends/rioterm/src/screen/mod.rs` | Added LeaderMenuState, input handling |
+| `frontends/rioterm/src/screen/leader.rs` | New: menu state and logic |
+| `frontends/rioterm/src/renderer/mod.rs` | Added LeaderMenu state, rendering integration |
+| `frontends/rioterm/src/renderer/leader.rs` | New: menu overlay rendering |
+| `frontends/rioterm/src/bindings/mod.rs` | Added ToggleLeaderMenu action, Ctrl+Space binding |
+| `rio-backend/src/config/leader.rs` | New: leader config structs |
 | `rio-backend/src/config/mod.rs` | Include leader config |
 
 ## References
