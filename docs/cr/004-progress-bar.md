@@ -33,12 +33,13 @@ ESC ] 9 ; 4 ; <state> ; <progress> ST
 Where:
 - `ESC ]` is the OSC introducer (0x1B 0x5D)
 - `ST` is the String Terminator (0x1B 0x5C or 0x07 BEL)
-- `<state>` is a digit 0-4:
+- `<state>` is a digit 0-5:
   - `0` = Hidden (remove progress bar)
-  - `1` = Default/Normal (show progress)
+  - `1` = Default/Normal (show progress) - blue
   - `2` = Error (red progress bar)
-  - `3` = Indeterminate/Paused (pulsing animation)
+  - `3` = Indeterminate/Paused (pulsing animation) - blue
   - `4` = Warning (yellow progress bar)
+  - `5` = Success (green progress bar) - Rio extension
 - `<progress>` is 0-100 (percentage), optional for state 0 and 3
 
 ### Example Sequences
@@ -58,6 +59,9 @@ printf '\e]9;4;0\e\\'
 
 # Show warning at 100%
 printf '\e]9;4;4;100\e\\'
+
+# Show success (green) at 100% - Rio extension
+printf '\e]9;4;5;100\e\\'
 ```
 
 ## Architecture
@@ -93,10 +97,11 @@ GPU draws progress bar overlay
 pub enum ProgressState {
     #[default]
     Hidden,
-    Normal { progress: u8 },      // 0-100
+    Normal { progress: u8 },      // 0-100, blue
     Error { progress: u8 },       // 0-100, red
-    Indeterminate,                // pulsing animation
+    Indeterminate,                // pulsing animation, blue
     Warning { progress: u8 },     // 0-100, yellow
+    Success { progress: u8 },     // 0-100, green (Rio extension)
 }
 
 impl ProgressState {
@@ -145,6 +150,7 @@ fn set_progress_state(&mut self, state: Option<u8>, progress: Option<u8>) {
         Some(2) => ProgressState::Error { progress },
         Some(3) => ProgressState::Indeterminate,
         Some(4) => ProgressState::Warning { progress },
+        Some(5) => ProgressState::Success { progress },
         _ => ProgressState::Hidden,
     };
 }
@@ -164,6 +170,7 @@ fn progress_bar_color(state: &ProgressState) -> [f32; 4] {
         ProgressState::Normal { .. } => [0.2, 0.6, 1.0, 1.0],      // Blue
         ProgressState::Error { .. } => [1.0, 0.3, 0.3, 1.0],       // Red
         ProgressState::Warning { .. } => [1.0, 0.8, 0.2, 1.0],     // Yellow
+        ProgressState::Success { .. } => [0.3, 0.8, 0.4, 1.0],     // Green
         ProgressState::Indeterminate => [0.2, 0.6, 1.0, 1.0],      // Blue (animated)
         ProgressState::Hidden => [0.0, 0.0, 0.0, 0.0],
     }
@@ -277,6 +284,68 @@ progress-bar-height = 3
 3. Extend to tab headers, dock badges
 4. Continuous redraw timer for smoother indeterminate animation
 
+## Shell Integration: Command Exit Status
+
+You can use the progress bar to show command exit status by configuring your shell.
+
+### Zsh (~/.zshrc)
+
+```zsh
+# Show command exit status in progress bar
+precmd() {
+  local exit_code=$?
+  if [[ $exit_code -eq 0 ]]; then
+    printf '\e]9;4;5;100\e\\'  # Success - green
+  else
+    printf '\e]9;4;2;100\e\\'  # Error - red
+  fi
+  # Auto-hide after 2 seconds
+  (sleep 2 && printf '\e]9;4;0\e\\') &!
+}
+```
+
+### Bash (~/.bashrc)
+
+```bash
+# Show command exit status in progress bar
+PROMPT_COMMAND='
+  exit_code=$?
+  if [[ $exit_code -eq 0 ]]; then
+    printf "\e]9;4;5;100\e\\"  # Success - green
+  else
+    printf "\e]9;4;2;100\e\\"  # Error - red
+  fi
+  (sleep 2 && printf "\e]9;4;0\e\\") &
+'
+```
+
+### Fish (~/.config/fish/config.fish)
+
+```fish
+function __rio_postexec --on-event fish_postexec
+    if test $status -eq 0
+        printf '\e]9;4;5;100\e\\'  # Success - green
+    else
+        printf '\e]9;4;2;100\e\\'  # Error - red
+    end
+end
+```
+
+With auto-hide after 2 seconds:
+
+```fish
+function __rio_postexec --on-event fish_postexec
+    if test $status -eq 0
+        printf '\e]9;4;5;100\e\\'  # Success - green
+    else
+        printf '\e]9;4;2;100\e\\'  # Error - red
+    end
+    # Auto-hide after 2 seconds
+    fish -c "sleep 2; printf '\e]9;4;0\e\\\\'" &
+    disown
+end
+```
+
 ## Testing
 
 ### Manual Testing Script
@@ -295,15 +364,19 @@ done
 
 sleep 0.5
 
-# Error state
+# Success state (green)
+printf '\e]9;4;5;100\e\\'
+sleep 1
+
+# Error state (red)
 printf '\e]9;4;2;75\e\\'
 sleep 1
 
-# Warning state
+# Warning state (yellow)
 printf '\e]9;4;4;100\e\\'
 sleep 1
 
-# Indeterminate
+# Indeterminate (pulsing blue)
 printf '\e]9;4;3\e\\'
 sleep 3
 

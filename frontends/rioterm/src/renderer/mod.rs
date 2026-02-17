@@ -1356,6 +1356,7 @@ impl Renderer {
                     ProgressState::Normal { progress } => progress as f32 / 100.0,
                     ProgressState::Error { progress } => progress as f32 / 100.0,
                     ProgressState::Warning { progress } => progress as f32 / 100.0,
+                    ProgressState::Success { progress } => progress as f32 / 100.0,
                     ProgressState::Indeterminate => {
                         // For indeterminate, show a pulsing segment
                         // Use time-based animation
@@ -1379,6 +1380,7 @@ impl Renderer {
                     }
                     ProgressState::Error { .. } => [1.0, 0.3, 0.3, 1.0], // Red
                     ProgressState::Warning { .. } => [1.0, 0.8, 0.2, 1.0], // Yellow
+                    ProgressState::Success { .. } => [0.3, 0.8, 0.4, 1.0], // Green
                     ProgressState::Hidden => [0.0, 0.0, 0.0, 0.0],
                 };
 

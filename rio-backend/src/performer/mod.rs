@@ -375,17 +375,24 @@ where
                             }
                         }
                         token if token == self.pty.child_event_token() => {
-                            if let Some(teletypewriter::ChildEvent::Exited) =
+                            if let Some(teletypewriter::ChildEvent::Exited(exit_status)) =
                                 self.pty.next_child_event()
                             {
-                                // In the future allow configure exit
-                                // if self.hold {
-                                //     With hold enabled, make sure the PTY is drained.
-                                //     let _ = self.pty_read(&mut state, &mut buf);
-                                // } else {
-                                //     // Without hold, shutdown the terminal.
-                                //     self.terminal.lock().exit();
-                                // }
+                                // Set progress bar based on exit status
+                                // On Unix, exit_status is the raw status from waitpid
+                                // Use WEXITSTATUS macro logic: (status >> 8) & 0xff
+                                let exit_code = exit_status.map(|s| (s >> 8) & 0xff);
+                                {
+                                    use crate::ansi::ProgressState;
+                                    let mut terminal = self.terminal.lock();
+                                    terminal.progress_state = match exit_code {
+                                        Some(0) => {
+                                            ProgressState::Success { progress: 100 }
+                                        }
+                                        Some(_) => ProgressState::Error { progress: 100 },
+                                        None => ProgressState::Hidden, // Unknown exit code
+                                    };
+                                }
 
                                 self.terminal.lock().exit();
 

@@ -19,7 +19,8 @@ extern "system" fn child_exit_callback(ctx: *mut c_void, timed_out: BOOLEAN) {
     }
 
     let event_tx: Box<_> = unsafe { Box::from_raw(ctx as *mut Sender<ChildEvent>) };
-    let _ = event_tx.send(ChildEvent::Exited);
+    // TODO: Get actual exit code using GetExitCodeProcess
+    let _ = event_tx.send(ChildEvent::Exited(None));
 }
 
 pub struct ChildExitWatcher {
@@ -122,9 +123,9 @@ mod tests {
         poll.poll(&mut events, Some(WAIT_TIMEOUT)).unwrap();
         assert_eq!(events.iter().next().unwrap().token(), child_events_token);
         // Verify that at least one `ChildEvent::Exited` was received.
-        assert_eq!(
+        assert!(matches!(
             child_exit_watcher.event_rx().try_recv(),
-            Ok(ChildEvent::Exited)
-        );
+            Ok(ChildEvent::Exited(_))
+        ));
     }
 }

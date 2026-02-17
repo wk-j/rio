@@ -115,6 +115,7 @@ pub enum KeyboardModesApplyBehavior {
 /// Progress bar state from ConEmu OSC 9;4 sequence.
 ///
 /// See: <https://conemu.github.io/en/AnsiEscapeCodes.html#ConEmu_specific_OSC>
+/// Extended with state 5 for success (green) - Rio extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProgressState {
     /// Progress bar is hidden (state 0)
@@ -137,6 +138,11 @@ pub enum ProgressState {
         /// Progress value 0-100
         progress: u8,
     },
+    /// Success state (state 5) - green progress bar (Rio extension)
+    Success {
+        /// Progress value 0-100
+        progress: u8,
+    },
 }
 
 impl ProgressState {
@@ -152,7 +158,8 @@ impl ProgressState {
         match self {
             ProgressState::Normal { progress }
             | ProgressState::Error { progress }
-            | ProgressState::Warning { progress } => Some(*progress),
+            | ProgressState::Warning { progress }
+            | ProgressState::Success { progress } => Some(*progress),
             ProgressState::Hidden | ProgressState::Indeterminate => None,
         }
     }
@@ -166,6 +173,7 @@ impl ProgressState {
             2 => ProgressState::Error { progress },
             3 => ProgressState::Indeterminate,
             4 => ProgressState::Warning { progress },
+            5 => ProgressState::Success { progress },
             _ => ProgressState::Hidden,
         }
     }

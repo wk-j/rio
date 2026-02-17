@@ -47,8 +47,9 @@ pub trait ProcessReadWrite {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ChildEvent {
-    /// Indicates the child has exited.
-    Exited,
+    /// Indicates the child has exited with an optional exit code.
+    /// The exit code is the raw status from waitpid (use WEXITSTATUS to extract).
+    Exited(Option<i32>),
 }
 
 pub trait EventedPty: ProcessReadWrite {
