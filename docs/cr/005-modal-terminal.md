@@ -17,8 +17,8 @@ Implement a leader key system that triggers a modal dialog popup, allowing users
 ## User Flow
 
 ```
-1. User presses leader key (e.g., Ctrl+Space)
-2. Modal dialog appears with all actions
+1. User presses leader key (Ctrl+;)
+2. Modal dialog appears at bottom-right with all actions
 3. User presses key to select action
 4. Action executes, modal closes
 ```
@@ -30,21 +30,24 @@ Implement a leader key system that triggers a modal dialog popup, allowing users
 | $ cargo build                                     |
 |    Compiling rio v0.2.0                          |
 |                                                  |
-|   +----------------------------------------+     |
-|   |  Rio Commands                          |     |
-|   +----------------------------------------+     |
-|   |  n  New window        c  Close window  |     |
-|   |  t  New tab           x  Close tab     |     |
-|   |  v  Split vertical    h  Split horiz   |     |
-|   |  [  Previous tab      ]  Next tab      |     |
-|   |  y  Copy mode         /  Search        |     |
-|   |  =  Align windows     r  Reset term    |     |
-|   +----------------------------------------+     |
-|   |  Press key or Esc to cancel            |     |
-|   +----------------------------------------+     |
 |                                                  |
+|                                                  |
+|                                                  |
+|     +----------------------------------------+   |
+|     |  Rio Commands                          |   |
+|     +----------------------------------------+   |
+|     |  n  New window        [  Prev tab      |   |
+|     |  t  New tab           ]  Next tab      |   |
+|     |  x  Close tab         y  Copy mode     |   |
+|     |  v  Split down        /  Search        |   |
+|     |  h  Split right       r  Reset         |   |
+|     +----------------------------------------+   |
+|     |  Press key or Esc to cancel            |   |
+|     +----------------------------------------+   |
 +--------------------------------------------------+
 ```
+
+Note: Menu appears at bottom-right corner of the terminal.
 
 ## Architecture
 
@@ -122,62 +125,51 @@ fn default_leader_items() -> Vec<LeaderMenuItem> {
         item('n', "New window", LeaderItemAction::Action(Action::WindowCreateNew)),
         item('t', "New tab", LeaderItemAction::Action(Action::TabCreateNew)),
         item('x', "Close tab", LeaderItemAction::Action(Action::TabCloseCurrent)),
-        item('v', "Split vertical", LeaderItemAction::Action(Action::SplitVertically)),
-        item('h', "Split horizontal", LeaderItemAction::Action(Action::SplitHorizontally)),
+        item('[', "Prev tab", LeaderItemAction::Action(Action::SelectPrevTab)),
+        item(']', "Next tab", LeaderItemAction::Action(Action::SelectNextTab)),
+        item('v', "Split down", LeaderItemAction::Action(Action::SplitDown)),
+        item('h', "Split right", LeaderItemAction::Action(Action::SplitRight)),
         item('y', "Copy mode", LeaderItemAction::Action(Action::ToggleViMode)),
         item('/', "Search", LeaderItemAction::Action(Action::SearchForward)),
-        item('r', "Reset terminal", LeaderItemAction::Action(Action::ResetTerminal)),
+        item('r', "Reset", LeaderItemAction::Action(Action::ResetTerminal)),
     ]
 }
-```
 ```
 
 ## Rendering
 
 ### Menu Panel
 
-The menu should be rendered as a centered overlay panel:
+The menu is rendered as a bottom-right overlay panel:
 
 ```rust
-pub struct LeaderMenuRenderer {
-    background_color: Color,    // Semi-transparent dark
-    border_color: Color,
-    text_color: Color,
-    key_color: Color,           // Highlighted key
-}
+/// Draw the leader menu overlay
+pub fn draw_leader_menu(
+    objects: &mut Vec<Object>,
+    rich_text_id: usize,
+    colors: &Colors,
+    items: &[LeaderItem],
+    dimensions: (f32, f32, f32),
+) {
+    let (width, height, scale) = dimensions;
+    let scaled_width = width / scale;
+    let scaled_height = height / scale;
 
-impl LeaderMenuRenderer {
-    pub fn render(&self, state: &LeaderMenuState, sugarloaf: &mut Sugarloaf) {
-        // Calculate menu dimensions (2 columns)
-        let columns = 2;
-        let rows = (state.items.len() + 1) / columns;
-        
-        // Center in terminal
-        let x = (terminal_width - width) / 2;
-        let y = (terminal_height - height) / 2;
-        
-        // Draw background with border
-        self.draw_panel(x, y, width, height);
-        
-        // Draw title
-        self.draw_title("Rio Commands", x, y);
-        
-        // Draw menu items in 2 columns
-        for (i, item) in state.items.iter().enumerate() {
-            let col = i % columns;
-            let row = i / columns;
-            self.draw_item(item, x + col * col_width, y + row + 1);
-        }
-        
-        // Draw footer hint
-        self.draw_footer("Press key or Esc to cancel", x, y + height - 1);
-    }
-    
-    fn draw_item(&self, item: &LeaderMenuItem, x: f32, y: f32) {
-        // "  n  New window  "
-        //  ^^^- key_color (highlighted)
-        //      ^^^^^^^^^^^- text_color
-    }
+    // Menu dimensions - auto-size based on items
+    let item_height = 20.0;
+    let padding = 16.0;
+    let menu_width = 220.0_f32.min(scaled_width - 20.0);
+    let menu_height = (items.len() as f32 * item_height + padding * 4.0)
+        .min(scaled_height - 20.0);
+
+    // Position at bottom-right with margin
+    let margin = 10.0;
+    let menu_x = scaled_width - menu_width - margin;
+    let menu_y = scaled_height - menu_height - margin;
+
+    // Draw background quad with rounded corners
+    // Draw border quad
+    // Draw rich text content
 }
 ```
 
@@ -196,7 +188,7 @@ const MENU_HINT: Color = Color::rgb(127, 132, 156);       // Dimmed
 
 ```toml
 [leader]
-# Key to trigger leader menu
+# Key to trigger leader menu (default: ctrl+space, but hardcoded binding uses ctrl+;)
 key = "ctrl+space"
 
 # Custom menu items
@@ -217,13 +209,13 @@ action = "TabCloseCurrent"
 
 [[leader.items]]
 key = "v"
-label = "Split vertical"
-action = "SplitVertically"
+label = "Split down"
+action = "SplitDown"
 
 [[leader.items]]
 key = "h"
-label = "Split horizontal"
-action = "SplitHorizontally"
+label = "Split right"
+action = "SplitRight"
 
 [[leader.items]]
 key = "y"
@@ -321,14 +313,14 @@ All existing Rio actions can be used:
 
 ### Phase 1: Core Menu System (Done)
 1. Added `LeaderMenuState` to screen state
-2. Implemented leader key detection (Ctrl+Space)
+2. Implemented leader key detection (Ctrl+;)
 3. Added basic menu data structures in `rio-backend/src/config/leader.rs`
 4. Handle menu input (key selection, Esc to close)
 
 ### Phase 2: Rendering (Done)
 1. Created menu overlay renderer in `frontends/rioterm/src/renderer/leader.rs`
-2. Draw menu panel with items
-3. Semi-transparent background overlay
+2. Draw menu panel at bottom-right with items
+3. Uses theme bar color for background
 
 ### Phase 3: Actions (Done)
 1. Connected menu items to existing Actions
