@@ -248,18 +248,45 @@ write = "ls -la\n"
 
 ### Action Types
 
-Each menu item supports one of two action types:
+Each menu item supports one of three action types:
 
 | Field | Description | Example |
 |-------|-------------|---------|
 | `action` | Execute built-in Rio action | `"TabCreateNew"` |
 | `write` | Write text to PTY (as if typed) | `"git status\n"` |
+| `exec` | Execute command in background | `"git push"` |
 
 Note: Include `\n` at the end of `write` to execute the command.
 
+#### Background Execution (`exec`)
+
+The `exec` field runs a command in the background from the current working directory. While the command is running, an indeterminate (pulsing) progress bar is shown. When it completes:
+- **Success** (exit code 0): Green progress bar
+- **Error** (non-zero exit code): Red progress bar
+
+```toml
+# Git push in background
+[[leader.items]]
+key = "p"
+label = "Git push"
+exec = "git push"
+
+# Run tests
+[[leader.items]]
+key = "T"
+label = "Run tests"
+exec = "cargo test"
+
+# Format code
+[[leader.items]]
+key = "f"
+label = "Format"
+exec = "cargo fmt"
+```
+
 ### Variables
 
-Variables can be used in `write` values using `${VAR}` syntax:
+Variables can be used in `write` and `exec` values using `${VAR}` syntax:
 
 | Variable | Description |
 |----------|-------------|

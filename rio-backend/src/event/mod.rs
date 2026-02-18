@@ -169,6 +169,9 @@ pub enum RioEvent {
     /// Cycle focus to the previous window.
     CycleWindowPrev,
 
+    /// Update progress bar with command exit code (0 = success, non-zero = error).
+    UpdateProgressBar(i32),
+
     // No operation
     Noop,
 }
@@ -242,6 +245,9 @@ impl Debug for RioEvent {
             }
             RioEvent::ColorChange(route_id, color, rgb) => {
                 write!(f, "ColorChange({route_id}, {color:?}, {rgb:?})")
+            }
+            RioEvent::UpdateProgressBar(exit_code) => {
+                write!(f, "UpdateProgressBar({exit_code})")
             }
         }
     }

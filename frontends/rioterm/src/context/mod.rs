@@ -592,6 +592,16 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     }
 
     #[inline]
+    pub fn event_proxy(&self) -> &T {
+        &self.event_proxy
+    }
+
+    #[inline]
+    pub fn window_id(&self) -> WindowId {
+        self.window_id
+    }
+
+    #[inline]
     pub fn close_unfocused_tabs(&mut self) {
         let current_route_id = self.current().route_id;
         self.titles.titles.retain(|&i, _| i == self.current_index);

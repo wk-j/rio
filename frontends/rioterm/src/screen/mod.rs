@@ -740,6 +740,10 @@ impl Screen<'_> {
                         .current_mut()
                         .messenger
                         .send_write(expanded.into_bytes());
+                } else if let Some(exec_str) = &item.exec {
+                    // Execute command in background and show progress
+                    let expanded = self.expand_leader_variables(exec_str);
+                    self.execute_background_command(&expanded);
                 }
 
                 self.render();
@@ -844,6 +848,68 @@ impl Screen<'_> {
             Act::CycleWindowPrev => self.context_manager.cycle_window_prev(),
             _ => {}
         }
+    }
+
+    /// Execute a command in background and show progress bar with result
+    fn execute_background_command(&mut self, command: &str) {
+        use rio_backend::ansi::ProgressState;
+
+        // Get the current working directory from the foreground process
+        #[cfg(not(target_os = "windows"))]
+        let cwd = {
+            let current_context = self.context_manager.current();
+            teletypewriter::foreground_process_path(
+                *current_context.main_fd,
+                current_context.shell_pid,
+            )
+            .ok()
+        };
+        #[cfg(target_os = "windows")]
+        let cwd: Option<std::path::PathBuf> = None;
+
+        // Show indeterminate progress bar
+        {
+            let mut terminal = self.context_manager.current_mut().terminal.lock();
+            terminal.progress_state = ProgressState::Indeterminate;
+        }
+        self.render();
+
+        // Clone what we need for the thread
+        let command = command.to_string();
+        let event_proxy = self.context_manager.event_proxy().clone();
+        let window_id = self.context_manager.window_id();
+
+        // Spawn background thread to execute command
+        std::thread::spawn(move || {
+            let mut cmd = if cfg!(windows) {
+                let mut c = std::process::Command::new("cmd");
+                c.args(["/C", &command]);
+                c
+            } else {
+                let mut c = std::process::Command::new("sh");
+                c.args(["-c", &command]);
+                c
+            };
+
+            // Set working directory if available
+            if let Some(ref dir) = cwd {
+                cmd.current_dir(dir);
+            }
+
+            // Suppress output
+            cmd.stdout(std::process::Stdio::null());
+            cmd.stderr(std::process::Stdio::null());
+
+            let exit_code = cmd.status().map(|s| s.code().unwrap_or(1)).unwrap_or(1);
+
+            // Send event to update progress bar with result
+            event_proxy.send_event(
+                rio_backend::event::RioEventType::Rio(
+                    rio_backend::event::RioEvent::UpdateProgressBar(exit_code),
+                ),
+                window_id,
+            );
+        });
     }
 
     /// Expand variables in leader menu write strings

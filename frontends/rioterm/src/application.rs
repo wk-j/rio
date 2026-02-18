@@ -968,6 +968,22 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     self.cycle_window_focus(true);
                 }
             }
+            RioEventType::Rio(RioEvent::UpdateProgressBar(exit_code)) => {
+                // Update progress bar based on background command exit code
+                if let Some(route) = self.router.routes.get_mut(&window_id) {
+                    use rio_backend::ansi::ProgressState;
+                    let progress_state = if exit_code == 0 {
+                        ProgressState::Success { progress: 100 }
+                    } else {
+                        ProgressState::Error { progress: 100 }
+                    };
+                    let mut terminal =
+                        route.window.screen.ctx_mut().current_mut().terminal.lock();
+                    terminal.progress_state = progress_state;
+                    drop(terminal);
+                    route.window.screen.render();
+                }
+            }
             _ => {}
         }
     }

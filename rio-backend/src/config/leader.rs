@@ -106,30 +106,35 @@ fn default_leader_items() -> Vec<LeaderItem> {
             label: "New window".to_string(),
             action: Some("WindowCreateNew".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: 't',
             label: "New tab".to_string(),
             action: Some("TabCreateNew".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: 'x',
             label: "Close".to_string(),
             action: Some("CloseCurrentSplitOrTab".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: '[',
             label: "Prev tab".to_string(),
             action: Some("SelectPrevTab".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: ']',
             label: "Next tab".to_string(),
             action: Some("SelectNextTab".to_string()),
             write: None,
+            exec: None,
         },
         // Split creation
         LeaderItem {
@@ -137,12 +142,14 @@ fn default_leader_items() -> Vec<LeaderItem> {
             label: "Split right".to_string(),
             action: Some("SplitRight".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: 'v',
             label: "Split down".to_string(),
             action: Some("SplitDown".to_string()),
             write: None,
+            exec: None,
         },
         // Pane navigation (vim-style h/j/k/l)
         LeaderItem {
@@ -150,30 +157,35 @@ fn default_leader_items() -> Vec<LeaderItem> {
             label: "Pane left".to_string(),
             action: Some("SelectSplitLeft".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: 'j',
             label: "Pane down".to_string(),
             action: Some("SelectSplitDown".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: 'k',
             label: "Pane up".to_string(),
             action: Some("SelectSplitUp".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: 'l',
             label: "Pane right".to_string(),
             action: Some("SelectSplitRight".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: 'z',
             label: "Zoom pane".to_string(),
             action: Some("ToggleZoom".to_string()),
             write: None,
+            exec: None,
         },
         // Other
         LeaderItem {
@@ -181,18 +193,21 @@ fn default_leader_items() -> Vec<LeaderItem> {
             label: "Copy mode".to_string(),
             action: Some("ToggleViMode".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: '/',
             label: "Search".to_string(),
             action: Some("SearchForward".to_string()),
             write: None,
+            exec: None,
         },
         LeaderItem {
             key: 'r',
             label: "Clear history".to_string(),
             action: Some("ClearHistory".to_string()),
             write: None,
+            exec: None,
         },
     ]
 }
@@ -214,4 +229,10 @@ pub struct LeaderItem {
     /// Supports variables: ${SELECTION}, ${WORD}, ${LINE}, ${CWD}, ${FILE}
     #[serde(default)]
     pub write: Option<String>,
+
+    /// Command to execute in background from current working directory.
+    /// Shows indeterminate progress bar while running, then success (green) or error (red).
+    /// Supports variables: ${SELECTION}, ${WORD}, ${LINE}, ${CWD}, ${FILE}
+    #[serde(default)]
+    pub exec: Option<String>,
 }
