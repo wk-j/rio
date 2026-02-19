@@ -981,6 +981,15 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         route.window.screen.ctx_mut().current_mut().terminal.lock();
                     terminal.progress_state = progress_state;
                     drop(terminal);
+                    // Mark pending update as dirty so the renderer processes the change
+                    route
+                        .window
+                        .screen
+                        .ctx_mut()
+                        .current_mut()
+                        .renderable_content
+                        .pending_update
+                        .set_ui_damage(rio_backend::event::TerminalDamage::Full);
                     route.window.screen.render();
                 }
             }

@@ -72,6 +72,9 @@ pub struct Renderer {
     // Visual bell state
     visual_bell_active: bool,
     visual_bell_start: Option<std::time::Instant>,
+    // Progress bar animation state
+    progress_bar_anim_start: Option<std::time::Instant>,
+    progress_bar_last_state: rio_backend::ansi::ProgressState,
     font_context: rio_backend::sugarloaf::font::FontLibrary,
     font_cache: FontCache,
     char_cache: CharCache,
@@ -126,6 +129,8 @@ impl Renderer {
             dynamic_background,
             visual_bell_active: false,
             visual_bell_start: None,
+            progress_bar_anim_start: None,
+            progress_bar_last_state: rio_backend::ansi::ProgressState::Hidden,
             search: Search::default(),
             leader_menu: LeaderMenu::default(),
             font_cache: FontCache::new(),
@@ -1350,8 +1355,30 @@ impl Renderer {
             let progress_state = terminal.progress_state;
             drop(terminal);
 
+            // Detect state transitions to start animation
+            if progress_state != self.progress_bar_last_state {
+                let should_animate =
+                    match (&self.progress_bar_last_state, &progress_state) {
+                        // Animate when transitioning to a visible result state
+                        (_, ProgressState::Success { .. })
+                        | (_, ProgressState::Error { .. })
+                        | (_, ProgressState::Normal { .. })
+                        | (_, ProgressState::Warning { .. }) => true,
+                        _ => false,
+                    };
+                if should_animate {
+                    self.progress_bar_anim_start = Some(std::time::Instant::now());
+                } else {
+                    self.progress_bar_anim_start = None;
+                }
+                self.progress_bar_last_state = progress_state;
+            }
+
             if progress_state.is_visible() {
                 const PROGRESS_BAR_HEIGHT: f32 = 3.0;
+                // Animation duration in seconds (fast fill)
+                const ANIM_DURATION: f32 = 0.3;
+
                 let progress_ratio = match progress_state {
                     ProgressState::Normal { progress } => progress as f32 / 100.0,
                     ProgressState::Error { progress } => progress as f32 / 100.0,
@@ -1374,6 +1401,28 @@ impl Renderer {
                     ProgressState::Hidden => 0.0,
                 };
 
+                // Apply fill animation: grow from 0 to target ratio over ANIM_DURATION
+                let (animated_ratio, animation_running) =
+                    if let Some(start) = self.progress_bar_anim_start {
+                        let elapsed = start.elapsed().as_secs_f32();
+                        if elapsed < ANIM_DURATION {
+                            // Ease-out cubic: fast start, smooth deceleration
+                            let t = elapsed / ANIM_DURATION;
+                            let eased = 1.0 - (1.0 - t).powi(3);
+                            (progress_ratio * eased, true)
+                        } else {
+                            (progress_ratio, false)
+                        }
+                    } else {
+                        (progress_ratio, false)
+                    };
+
+                // If animation is still running, keep rendering
+                if animation_running {
+                    let ctx = context_manager.current_grid_mut().current_mut();
+                    ctx.renderable_content.pending_update.set_dirty();
+                }
+
                 let color = match progress_state {
                     ProgressState::Normal { .. } | ProgressState::Indeterminate => {
                         [0.2, 0.6, 1.0, 1.0] // Blue
@@ -1388,10 +1437,10 @@ impl Renderer {
                 {
                     // For indeterminate, show a moving segment
                     let segment_width = window_size.width * 0.3;
-                    let x = progress_ratio * (window_size.width - segment_width);
+                    let x = animated_ratio * (window_size.width - segment_width);
                     (x, segment_width)
                 } else {
-                    (0.0, window_size.width * progress_ratio)
+                    (0.0, window_size.width * animated_ratio)
                 };
 
                 Some(Quad {

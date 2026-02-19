@@ -872,6 +872,12 @@ impl Screen<'_> {
             let mut terminal = self.context_manager.current_mut().terminal.lock();
             terminal.progress_state = ProgressState::Indeterminate;
         }
+        // Mark pending update as dirty so the renderer processes the change
+        self.context_manager
+            .current_mut()
+            .renderable_content
+            .pending_update
+            .set_ui_damage(rio_backend::event::TerminalDamage::Full);
         self.render();
 
         // Clone what we need for the thread
