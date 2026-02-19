@@ -878,16 +878,6 @@ impl Renderer {
             ..FragmentStyle::default()
         };
 
-        let hint_style = FragmentStyle {
-            color: [
-                self.named_colors.foreground[0],
-                self.named_colors.foreground[1],
-                self.named_colors.foreground[2],
-                0.5,
-            ],
-            ..FragmentStyle::default()
-        };
-
         let line = content.sel(rich_text_id);
         line.clear();
         line.new_line();

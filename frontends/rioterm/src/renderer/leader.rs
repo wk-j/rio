@@ -61,34 +61,3 @@ pub fn draw_leader_menu(
 
     let _ = items; // Items will be rendered via the rich text
 }
-
-/// Format leader menu items for rich text display
-pub fn format_leader_items(items: &[LeaderItem]) -> String {
-    let mut output = String::new();
-    output.push_str("Rio Commands\n\n");
-
-    // Render items in 2 columns
-    let half = (items.len() + 1) / 2;
-
-    for (i, item) in items.iter().enumerate() {
-        let key_display = match item.key {
-            ' ' => "SPC".to_string(),
-            '\n' => "RET".to_string(),
-            '\t' => "TAB".to_string(),
-            c => c.to_string(),
-        };
-
-        let line = format!("  {}  {}", key_display, item.label);
-        output.push_str(&line);
-
-        // Add newline or spacing for 2-column layout
-        if i < half - 1 || i >= half {
-            output.push('\n');
-        } else {
-            output.push_str("    ");
-        }
-    }
-
-    output.push_str("\n\nPress key or Esc to cancel");
-    output
-}
