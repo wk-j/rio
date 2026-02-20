@@ -98,6 +98,42 @@ pub struct QuickTerminalState<T: EventListener> {
     pub saved_focus: usize,
 }
 
+/// Fractional position and size for a command overlay within the window.
+/// Values are 0.0–1.0 fractions of window width/height.
+#[derive(Clone, Debug)]
+pub struct CommandOverlayBounds {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Default for CommandOverlayBounds {
+    fn default() -> Self {
+        Self {
+            x: 0.6,
+            y: 0.05,
+            width: 0.38,
+            height: 0.55,
+        }
+    }
+}
+
+/// State for a command output overlay — a real PTY running a specific command,
+/// rendered as a floating panel on top of terminal content. Always click-through
+/// (keyboard input stays on the underlying pane). Auto-dismisses on process exit.
+#[allow(dead_code)]
+pub struct CommandOverlayState<T: EventListener> {
+    /// The overlay's context (PTY + terminal grid + IO thread)
+    pub item: ContextGridItem<T>,
+    /// Whether the overlay is currently visible
+    pub visible: bool,
+    /// The command string that was spawned (used as an identifier for toggle)
+    pub command: String,
+    /// Fractional bounds within the window
+    pub bounds: CommandOverlayBounds,
+}
+
 pub struct ContextGrid<T: EventListener> {
     pub width: f32,
     pub height: f32,
@@ -112,6 +148,10 @@ pub struct ContextGrid<T: EventListener> {
     pub zoomed_key: Option<usize>,
     /// Quick terminal state (overlay terminal at bottom)
     pub quick_terminal: Option<QuickTerminalState<T>>,
+    /// Command output overlays (floating, click-through, real PTY)
+    pub command_overlays: Vec<CommandOverlayState<T>>,
+    /// Appearance config for command overlay panels
+    pub command_overlay_style: rio_backend::config::command_overlay::CommandOverlayStyle,
 }
 
 pub struct ContextGridItem<T: EventListener> {
@@ -170,7 +210,12 @@ impl<T: rio_backend::event::EventListener> ContextGridItem<T> {
 }
 
 impl<T: rio_backend::event::EventListener> ContextGrid<T> {
-    pub fn new(context: Context<T>, margin: Delta<f32>, border_color: [f32; 4]) -> Self {
+    pub fn new(
+        context: Context<T>,
+        margin: Delta<f32>,
+        border_color: [f32; 4],
+        command_overlay_style: rio_backend::config::command_overlay::CommandOverlayStyle,
+    ) -> Self {
         let width = context.dimension.width;
         let height = context.dimension.height;
         let scale = context.dimension.dimension.scale;
@@ -189,6 +234,8 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             root: Some(root_key),
             zoomed_key: None,
             quick_terminal: None,
+            command_overlays: Vec::new(),
+            command_overlay_style,
         };
         grid.calculate_positions_for_affected_nodes(&[root_key]);
         grid
@@ -392,6 +439,75 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         let _ = qt.item.val.messenger.send_resize(winsize);
 
         true
+    }
+
+    // ── Command overlay methods ────────────────────────────────────────
+
+    /// Open a command overlay with a pre-created context.
+    /// The overlay is a floating, click-through panel; it does NOT receive
+    /// keyboard focus (input stays on the underlying pane).
+    pub fn open_command_overlay(
+        &mut self,
+        context: Context<T>,
+        command: String,
+        bounds: CommandOverlayBounds,
+    ) {
+        let mut item = ContextGridItem::new(context);
+
+        // Compute pixel position and size from fractional bounds
+        let scale = item.val.dimension.dimension.scale;
+        let pixel_width = self.width * bounds.width;
+        let pixel_height = self.height * bounds.height;
+
+        item.val.dimension.update_width(pixel_width);
+        item.val.dimension.update_height(pixel_height);
+
+        let pos_x = (self.width * bounds.x) / scale;
+        let pos_y = (self.height * bounds.y) / scale;
+        item.set_position([pos_x, pos_y]);
+
+        // Resize PTY to match overlay dimensions
+        let mut terminal = item.val.terminal.lock();
+        terminal.resize::<ContextDimension>(item.val.dimension);
+        drop(terminal);
+        let winsize = crate::renderer::utils::terminal_dimensions(&item.val.dimension);
+        let _ = item.val.messenger.send_resize(winsize);
+
+        // NOTE: We do NOT change self.current — the overlay is click-through,
+        // so keyboard input stays on whatever pane was focused before.
+
+        self.command_overlays.push(CommandOverlayState {
+            item,
+            visible: true,
+            command,
+            bounds,
+        });
+    }
+
+    /// Toggle a command overlay by command string.
+    /// Returns `true` if a new context needs to be created (no existing overlay
+    /// matches this command). Returns `false` if an existing overlay was toggled.
+    pub fn toggle_command_overlay(&mut self, command: &str) -> bool {
+        if let Some(overlay) = self
+            .command_overlays
+            .iter_mut()
+            .find(|o| o.command == command)
+        {
+            overlay.visible = !overlay.visible;
+            false
+        } else {
+            true // caller must create a new context
+        }
+    }
+
+    /// Dismiss (remove) a command overlay by its context's route_id.
+    /// Used when the command process exits.
+    /// Returns `true` if an overlay was found and removed.
+    pub fn dismiss_command_overlay_by_route(&mut self, route_id: usize) -> bool {
+        let before = self.command_overlays.len();
+        self.command_overlays
+            .retain(|o| o.item.val.route_id != route_id);
+        self.command_overlays.len() < before
     }
 
     /// Get all keys in the order they appear in the grid (depth-first traversal)
@@ -750,6 +866,52 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 target.push(qt.item.rich_text_object.clone());
             }
         }
+
+        // Add command overlay panels if visible — rendered on top of everything
+        for overlay in &self.command_overlays {
+            if !overlay.visible {
+                continue;
+            }
+            let scale = overlay.item.val.dimension.dimension.scale;
+            let pos = overlay.item.position();
+            let overlay_w = overlay.item.val.dimension.width / scale;
+            let overlay_h = overlay.item.val.dimension.height / scale;
+            let style = &self.command_overlay_style;
+
+            // Determine background color: use config override if set, else terminal bg
+            let bg = if style.has_custom_background() {
+                let mut c = style.background_color;
+                c[3] *= style.opacity;
+                c
+            } else {
+                let mut c = background_color;
+                c[3] *= style.opacity;
+                c
+            };
+
+            // Determine border color: use config override if set, else split color
+            let bc = if style.has_custom_border_color() {
+                style.border_color
+            } else {
+                self.border_color
+            };
+
+            // Opaque background quad with rounded corners
+            target.push(Object::Quad(Quad {
+                position: pos,
+                color: bg,
+                size: [overlay_w, overlay_h],
+                border_radius: [style.border_radius; 4],
+                border_color: bc,
+                border_width: style.border_width,
+                shadow_color: style.shadow_color,
+                shadow_offset: style.shadow_offset,
+                shadow_blur_radius: style.shadow_blur_radius,
+            }));
+
+            // RichText content (terminal output from PTY)
+            target.push(overlay.item.rich_text_object.clone());
+        }
     }
 
     #[inline]
@@ -783,6 +945,13 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         if let Some(ref qt) = self.quick_terminal {
             if qt.visible {
                 objects.push(qt.item.rich_text_object.clone());
+            }
+        }
+
+        // Add command overlay panes if visible
+        for overlay in &self.command_overlays {
+            if overlay.visible {
+                objects.push(overlay.item.rich_text_object.clone());
             }
         }
 
@@ -2477,7 +2646,7 @@ pub mod test {
         let context_width = context.dimension.width;
         let context_height = context.dimension.height;
         let context_margin = context.dimension.margin;
-        let grid = ContextGrid::<VoidListener>::new(context, margin, [0., 0., 0., 0.]);
+        let grid = ContextGrid::<VoidListener>::new(context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
         // The first context should fill completely w/h grid
         assert_eq!(grid.width, context_width);
         assert_eq!(grid.height, context_height);
@@ -2546,7 +2715,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -2671,7 +2840,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -2892,7 +3061,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -3069,7 +3238,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -3193,7 +3362,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 1., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 1., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -3346,7 +3515,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [1., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -3552,7 +3721,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 1., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 1., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -3690,7 +3859,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -3790,7 +3959,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -3878,7 +4047,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -3977,7 +4146,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -4083,7 +4252,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -4171,7 +4340,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -4270,7 +4439,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -4428,7 +4597,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -4638,7 +4807,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -4944,7 +5113,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         assert_eq!(
             grid.objects(),
@@ -5013,7 +5182,7 @@ pub mod test {
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Test that we can't remove the last context
         assert_eq!(grid.len(), 1);
@@ -5075,7 +5244,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Add multiple splits to create a complex structure
@@ -5127,7 +5296,7 @@ pub mod test {
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // These operations should not crash
         grid.resize(0.0, 0.0);
@@ -5155,7 +5324,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Add a split
@@ -5187,7 +5356,7 @@ pub mod test {
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context, margin, [0., 0., 0., 0.]);
+            ContextGrid::<VoidListener>::new(context, margin, [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Test navigation with single context
         grid.select_next_split();
@@ -5218,7 +5387,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Create many splits
@@ -5278,7 +5447,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Add a split
@@ -5353,7 +5522,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Single split - should return false
@@ -5397,7 +5566,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Add a split down
@@ -5437,7 +5606,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Single split - should return false
@@ -5504,7 +5673,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Add a split right
@@ -5568,7 +5737,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Add splits
@@ -5609,7 +5778,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Create a complex layout: split right, then split down on the right side
@@ -5653,7 +5822,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Test with zero amount
@@ -5691,7 +5860,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // With only one split, no divider movement should work
@@ -5737,7 +5906,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Create multiple splits
@@ -5795,7 +5964,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             create_mock_context(VoidListener {}, WindowId::from(0), 0, context_dimension),
             margin,
-            [0., 0., 0., 0.],
+            [0., 0., 0., 0.], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Add a horizontal split
@@ -5878,7 +6047,7 @@ pub mod test {
         };
 
         let grid =
-            ContextGrid::<VoidListener>::new(context, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Single context should be positioned at margin
         assert_eq!(
@@ -5935,7 +6104,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
         grid.split_right(second_context);
 
         // First context should remain at origin
@@ -6006,7 +6175,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
         grid.split_down(second_context);
 
         // First context should remain at origin
@@ -6076,7 +6245,7 @@ pub mod test {
         };
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(first_context, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(first_context, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Create layout:
         // [0] [1]
@@ -6143,7 +6312,7 @@ pub mod test {
         let grid = ContextGrid::<VoidListener>::new(
             context,
             Delta::default(),
-            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
 
         // Verify scaled_padding is correctly calculated and stored
@@ -6178,7 +6347,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             first_context,
             Delta::default(),
-            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
         grid.split_right(second_context);
 
@@ -6228,7 +6397,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             first_context,
             Delta::default(),
-            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
         grid.split_down(second_context);
 
@@ -6280,7 +6449,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             first_context,
             Delta::default(),
-            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
         grid.split_right(second_context);
 
@@ -6330,7 +6499,7 @@ pub mod test {
         let mut grid = ContextGrid::<VoidListener>::new(
             first_context,
             Delta::default(),
-            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default(),
         );
         grid.split_down(second_context);
 
@@ -6381,7 +6550,7 @@ pub mod test {
 
         // Build layout: |1|2/3|
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Split right to get |1|2|
         grid.split_right(context2);
@@ -6489,7 +6658,7 @@ pub mod test {
 
         // Build layout: |1|2/3|
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
         grid.split_right(context2);
         grid.split_down(context3);
 
@@ -6552,7 +6721,7 @@ pub mod test {
             create_mock_context(VoidListener, WindowId::from(1), 2, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
         grid.split_right(context2);
 
         // Try to move divider by a large amount that would violate minimum width
@@ -6597,7 +6766,7 @@ pub mod test {
         let context1 =
             create_mock_context(VoidListener, WindowId::from(0), 1, context_dimension);
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Should not be able to move dividers with only one panel
         assert!(!grid.move_divider_left(50.0));
@@ -6628,7 +6797,7 @@ pub mod test {
             create_mock_context(VoidListener, WindowId::from(1), 2, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
         grid.split_down(context2);
 
         let ordered_keys = grid.get_ordered_keys();
@@ -6700,7 +6869,7 @@ pub mod test {
             create_mock_context(VoidListener, WindowId::from(2), 3, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Step 1: Split right to create |1|2|
         grid.split_right(context2);
@@ -6850,7 +7019,12 @@ pub mod test {
             ),
         );
 
-        let mut grid = ContextGrid::new(context, Delta::default(), [0.0, 0.0, 0.0, 0.0]);
+        let mut grid = ContextGrid::new(
+            context,
+            Delta::default(),
+            [0.0, 0.0, 0.0, 0.0],
+            rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+        );
         let root_key = grid.root.unwrap();
 
         // Verify root has no parent
@@ -6915,7 +7089,12 @@ pub mod test {
             ),
         );
 
-        let mut grid = ContextGrid::new(context, Delta::default(), [0.0, 0.0, 0.0, 0.0]);
+        let mut grid = ContextGrid::new(
+            context,
+            Delta::default(),
+            [0.0, 0.0, 0.0, 0.0],
+            rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+        );
         let panel1_key = grid.root.unwrap();
 
         // Create |1|2| layout
@@ -6994,7 +7173,12 @@ pub mod test {
             ),
         );
 
-        let mut grid = ContextGrid::new(context, Delta::default(), [0.0, 0.0, 0.0, 0.0]);
+        let mut grid = ContextGrid::new(
+            context,
+            Delta::default(),
+            [0.0, 0.0, 0.0, 0.0],
+            rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+        );
         let panel1_key = grid.root.unwrap();
 
         // Create |1|2|3| layout
@@ -7075,8 +7259,16 @@ pub mod test {
             ),
         );
 
-        let mut grid = ContextGrid::new(context, Delta::default(), [0.0, 0.0, 0.0, 0.0]);
+        let mut grid = ContextGrid::new(
+            context,
+            Delta::default(),
+            [0.0, 0.0, 0.0, 0.0],
+            rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+        );
         let root_key = grid.root.unwrap();
+
+        // Verify root has no parent
+        assert_eq!(grid.inner.get(&root_key).unwrap().parent, None);
 
         // Test root margin calculation (should use grid margin)
         let root_margin = grid.find_node_margin(root_key);
@@ -7134,7 +7326,7 @@ pub mod test {
             create_mock_context(VoidListener, WindowId::from(2), 3, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Build layout: |1|2/3|
         grid.split_right(context2);
@@ -7235,7 +7427,7 @@ pub mod test {
             create_mock_context(VoidListener, WindowId::from(2), 3, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Build layout: |1|2/3|
         grid.split_right(context2);
@@ -7326,7 +7518,7 @@ pub mod test {
             create_mock_context(VoidListener, WindowId::from(3), 4, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Build layout: |1|2/3|4|
         grid.split_right(context2); // |1|2|
@@ -7405,7 +7597,7 @@ pub mod test {
             create_mock_context(VoidListener, WindowId::from(2), 3, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Build layout: |1|2/3|
         grid.split_right(context2);
@@ -7462,7 +7654,7 @@ pub mod test {
             create_mock_context(VoidListener, WindowId::from(2), 3, context_dimension);
 
         let mut grid =
-            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0]);
+            ContextGrid::<VoidListener>::new(context1, margin, [1.0, 1.0, 1.0, 1.0], rio_backend::config::command_overlay::CommandOverlayStyle::default());
 
         // Build layout: |1|2/3|
         grid.split_right(context2); // |1|2|

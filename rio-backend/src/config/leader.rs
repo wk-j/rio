@@ -107,6 +107,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("WindowCreateNew".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: 't',
@@ -114,6 +115,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("TabCreateNew".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: 'x',
@@ -121,6 +123,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("CloseCurrentSplitOrTab".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: '[',
@@ -128,6 +131,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SelectPrevTab".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: ']',
@@ -135,6 +139,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SelectNextTab".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         // Split creation
         LeaderItem {
@@ -143,6 +148,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SplitRight".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: 'v',
@@ -150,6 +156,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SplitDown".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         // Pane navigation (vim-style h/j/k/l)
         LeaderItem {
@@ -158,6 +165,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SelectSplitLeft".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: 'j',
@@ -165,6 +173,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SelectSplitDown".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: 'k',
@@ -172,6 +181,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SelectSplitUp".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: 'l',
@@ -179,6 +189,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SelectSplitRight".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: 'z',
@@ -186,6 +197,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("ToggleZoom".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         // Other
         LeaderItem {
@@ -194,6 +206,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("ToggleViMode".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: '/',
@@ -201,6 +214,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("SearchForward".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
         LeaderItem {
             key: 'r',
@@ -208,6 +222,7 @@ fn default_leader_items() -> Vec<LeaderItem> {
             action: Some("ClearHistory".to_string()),
             write: None,
             exec: None,
+            overlay: None,
         },
     ]
 }
@@ -235,4 +250,11 @@ pub struct LeaderItem {
     /// Supports variables: ${SELECTION}, ${WORD}, ${LINE}, ${CWD}, ${FILE}
     #[serde(default)]
     pub exec: Option<String>,
+
+    /// Command to run as a live overlay panel (real PTY, full ANSI rendering).
+    /// The overlay floats above the terminal content and is click-through.
+    /// Toggle: press the key again to hide/show. Auto-dismisses on process exit.
+    /// Example: "top", "htop", "git log --oneline -20"
+    #[serde(default)]
+    pub overlay: Option<String>,
 }

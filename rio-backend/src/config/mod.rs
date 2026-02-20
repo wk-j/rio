@@ -1,6 +1,7 @@
 pub mod bell;
 pub mod bindings;
 pub mod colors;
+pub mod command_overlay;
 pub mod defaults;
 pub mod hints;
 pub mod keyboard;
@@ -15,6 +16,7 @@ pub mod window;
 use crate::ansi::CursorShape;
 use crate::config::bell::Bell;
 use crate::config::bindings::Bindings;
+use crate::config::command_overlay::CommandOverlayStyle;
 use crate::config::defaults::*;
 use crate::config::hints::Hints;
 use crate::config::keyboard::Keyboard;
@@ -157,6 +159,8 @@ pub struct Config {
     pub bell: Bell,
     #[serde(default = "Leader::default")]
     pub leader: Leader,
+    #[serde(default = "CommandOverlayStyle::default", rename = "command-overlay")]
+    pub command_overlay: CommandOverlayStyle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -628,6 +632,7 @@ impl Default for Config {
             hints: Hints::default(),
             bell: Bell::default(),
             leader: Leader::default(),
+            command_overlay: CommandOverlayStyle::default(),
         }
     }
 }

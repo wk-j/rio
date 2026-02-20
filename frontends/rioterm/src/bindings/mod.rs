@@ -324,6 +324,17 @@ impl From<String> for Action {
             }
         }
 
+        // overlay(command args) — toggle a command output overlay
+        let re = regex::Regex::new(r"overlay\(([^()]+)\)").unwrap();
+        for capture in re.captures_iter(&action) {
+            if let Some(matched) = capture.get(1) {
+                let command = matched.as_str().trim().to_string();
+                if !command.is_empty() {
+                    return Action::ToggleCommandOverlay(command);
+                }
+            }
+        }
+
         Action::None
     }
 }
@@ -524,6 +535,10 @@ pub enum Action {
 
     /// Toggle quick terminal (drop-down terminal at bottom, inherits CWD)
     ToggleQuickTerminal,
+
+    /// Toggle a command output overlay (floating, click-through PTY panel).
+    /// The String is the command to run (e.g., "top", "htop", "git log --oneline").
+    ToggleCommandOverlay(String),
 
     /// Cycle focus to next window (auto-align)
     CycleWindowNext,

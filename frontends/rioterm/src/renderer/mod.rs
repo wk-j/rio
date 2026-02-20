@@ -1251,6 +1251,60 @@ impl Renderer {
             }
         }
 
+        // Render command overlay terminal content (live PTY output)
+        for overlay in grid.command_overlays.iter_mut() {
+            if !overlay.visible {
+                continue;
+            }
+            let context = overlay.item.context_mut();
+            context.renderable_content.pending_update.reset();
+
+            let terminal_snapshot = {
+                let mut terminal = context.terminal.lock();
+                let snapshot = TerminalSnapshot {
+                    colors: terminal.colors,
+                    display_offset: terminal.display_offset(),
+                    blinking_cursor: terminal.blinking_cursor,
+                    visible_rows: terminal.visible_rows(),
+                    cursor: terminal.cursor(),
+                    damage: TerminalDamage::Full,
+                    columns: terminal.columns(),
+                    screen_lines: terminal.screen_lines(),
+                    progress_state: terminal.progress_state,
+                };
+                terminal.reset_damage();
+                drop(terminal);
+                snapshot
+            };
+
+            context.renderable_content.cursor.state = terminal_snapshot.cursor;
+
+            let rich_text_id = context.rich_text_id;
+            let is_cursor_visible = context.renderable_content.cursor.state.is_visible();
+
+            let content = sugarloaf.content();
+            content.sel(rich_text_id);
+            content.clear();
+            for (i, row) in terminal_snapshot.visible_rows.iter().enumerate() {
+                let has_cursor = is_cursor_visible
+                    && context.renderable_content.cursor.state.pos.row == i;
+                self.create_line(
+                    content,
+                    row,
+                    has_cursor,
+                    None,
+                    Line((i as i32) - terminal_snapshot.display_offset as i32),
+                    &context.renderable_content,
+                    None,  // no hint matches for command overlays
+                    &None, // no focused match
+                    &terminal_snapshot.colors,
+                    true, // always render as "active" (full opacity)
+                    true, // force opaque bg: overlay panel, nothing behind it
+                );
+            }
+            content.build();
+        }
+
         self.update_search_rich_text(sugarloaf.content());
 
         let window_size = sugarloaf.window_size();

@@ -121,6 +121,7 @@ pub struct ContextManagerConfig {
     pub split_color: [f32; 4],
     pub title: rio_backend::config::title::Title,
     pub keyboard: rio_backend::config::keyboard::Keyboard,
+    pub command_overlay_style: rio_backend::config::command_overlay::CommandOverlayStyle,
 }
 
 const DEFAULT_CONTEXT_CAPACITY: usize = 28;
@@ -385,6 +386,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                 initial_context,
                 margin,
                 ctx_config.split_color,
+                ctx_config.command_overlay_style,
             )],
             capacity: DEFAULT_CONTEXT_CAPACITY,
             event_proxy,
@@ -432,6 +434,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                 initial_context,
                 Delta::<f32>::default(),
                 config.split_color,
+                config.command_overlay_style,
             )],
             capacity,
             event_proxy,
@@ -469,6 +472,13 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                             self.contexts[self.current_index].current().route_id;
                         return false;
                     }
+                }
+
+                // Check if the exiting route belongs to a command overlay
+                if grid.dismiss_command_overlay_by_route(route_id) {
+                    // Command overlay process exited — just remove it.
+                    // No focus change needed (overlays are click-through).
+                    return false;
                 }
             }
 
@@ -1109,6 +1119,104 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
         }
     }
 
+    /// Toggle a command output overlay. The command runs in a real PTY with
+    /// full ANSI rendering. The overlay is click-through — keyboard input
+    /// stays on the underlying pane. If the command is already running, its
+    /// visibility is toggled. If not, a new PTY context is created.
+    pub fn toggle_command_overlay(&mut self, rich_text_id: usize, command: &str) {
+        let grid = &mut self.contexts[self.current_index];
+        let needs_creation = grid.toggle_command_overlay(command);
+
+        if !needs_creation {
+            // Existing overlay was toggled (shown/hidden).
+            // Do NOT change current_route — overlay is click-through.
+            return;
+        }
+
+        // Get CWD from current pane
+        let mut working_dir = self.config.working_dir.clone();
+        if self.config.cwd {
+            #[cfg(not(target_os = "windows"))]
+            {
+                let current_context = grid.current();
+                if let Ok(path) = teletypewriter::foreground_process_path(
+                    *current_context.main_fd,
+                    current_context.shell_pid,
+                ) {
+                    working_dir = Some(path.to_string_lossy().to_string());
+                }
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                working_dir = None;
+            }
+        }
+
+        // Override shell config to run the specific command
+        let mut cloned_config = self.config.clone();
+        if working_dir.is_some() {
+            cloned_config.working_dir = working_dir;
+        }
+        // Parse command string: first token is program, rest are args
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() {
+            tracing::error!("empty command for command overlay");
+            return;
+        }
+        cloned_config.shell = rio_backend::config::Shell {
+            program: parts[0].to_string(),
+            args: parts[1..].iter().map(|s| s.to_string()).collect(),
+        };
+        // Must use spawn (not fork) so the shell override actually takes effect
+        #[cfg(not(target_os = "windows"))]
+        {
+            cloned_config.use_fork = false;
+        }
+
+        let current = grid.current();
+        let cursor = current.cursor_from_ref();
+        let current_dim = current.dimension;
+
+        // Compute dimension for the floating overlay based on configured style
+        let style = &self.config.command_overlay_style;
+        let bounds = grid::CommandOverlayBounds {
+            x: style.x,
+            y: style.y,
+            width: style.width,
+            height: style.height,
+        };
+        let overlay_width = grid.width * bounds.width;
+        let overlay_height = grid.height * bounds.height;
+        let dimension = grid::ContextDimension::build(
+            overlay_width,
+            overlay_height,
+            current_dim.dimension,
+            current_dim.line_height,
+            grid.margin,
+        );
+
+        match ContextManager::create_context(
+            (&cursor, current.renderable_content.has_blinking_enabled),
+            self.event_proxy.clone(),
+            self.window_id,
+            rich_text_id,
+            dimension,
+            &cloned_config,
+        ) {
+            Ok(new_context) => {
+                grid.open_command_overlay(new_context, command.to_string(), bounds);
+                // Do NOT update self.current_route — overlay is click-through
+            }
+            Err(..) => {
+                tracing::error!(
+                    "not able to create command overlay context for: {}",
+                    command
+                );
+            }
+        }
+    }
+
     pub fn split_from_config(
         &mut self,
         rich_text_id: usize,
@@ -1136,6 +1244,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
             split_color: config.colors.split,
             title: config.title,
             keyboard: config.keyboard,
+            command_overlay_style: config.command_overlay,
         };
 
         let current = self.current();
@@ -1230,6 +1339,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                         new_context,
                         previous_margin,
                         self.config.split_color,
+                        self.config.command_overlay_style,
                     ));
                     if redirect {
                         self.current_index = last_index;

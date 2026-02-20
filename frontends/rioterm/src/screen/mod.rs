@@ -209,6 +209,7 @@ impl Screen<'_> {
             split_color: config.colors.split,
             title: config.title.clone(),
             keyboard: config.keyboard,
+            command_overlay_style: config.command_overlay,
         };
 
         let rich_text_id = sugarloaf.create_rich_text();
@@ -420,8 +421,14 @@ impl Screen<'_> {
         self.mouse
             .set_multiplier_and_divider(config.scroll.multiplier, config.scroll.divider);
 
-        // Update keyboard config in context manager
+        // Update keyboard and command overlay config in context manager
         self.context_manager.config.keyboard = config.keyboard;
+        self.context_manager.config.command_overlay_style = config.command_overlay;
+
+        // Update command overlay style on all grids for hot-reload
+        for context_grid in self.context_manager.contexts_mut() {
+            context_grid.command_overlay_style = config.command_overlay;
+        }
 
         if cfg!(target_os = "macos") {
             self.sugarloaf.set_background_color(None);
@@ -744,6 +751,12 @@ impl Screen<'_> {
                     // Execute command in background and show progress
                     let expanded = self.expand_leader_variables(exec_str);
                     self.execute_background_command(&expanded);
+                } else if let Some(overlay_str) = &item.overlay {
+                    // Toggle a live command output overlay (real PTY)
+                    let expanded = self.expand_leader_variables(overlay_str);
+                    let rich_text_id = self.sugarloaf.create_rich_text();
+                    self.context_manager
+                        .toggle_command_overlay(rich_text_id, &expanded);
                 }
 
                 self.render();
@@ -833,6 +846,11 @@ impl Screen<'_> {
             Act::ToggleQuickTerminal => {
                 let rich_text_id = self.sugarloaf.create_rich_text();
                 self.context_manager.toggle_quick_terminal(rich_text_id);
+            }
+            Act::ToggleCommandOverlay(command) => {
+                let rich_text_id = self.sugarloaf.create_rich_text();
+                self.context_manager
+                    .toggle_command_overlay(rich_text_id, &command);
             }
             Act::IncreaseFontSize => {
                 self.change_font_size(FontSizeAction::Increase);
@@ -1258,6 +1276,12 @@ impl Screen<'_> {
                     Act::ToggleQuickTerminal => {
                         let rich_text_id = self.sugarloaf.create_rich_text();
                         self.context_manager.toggle_quick_terminal(rich_text_id);
+                        self.render();
+                    }
+                    Act::ToggleCommandOverlay(ref command) => {
+                        let rich_text_id = self.sugarloaf.create_rich_text();
+                        self.context_manager
+                            .toggle_command_overlay(rich_text_id, command);
                         self.render();
                     }
                     Act::ConfigEditor => {
