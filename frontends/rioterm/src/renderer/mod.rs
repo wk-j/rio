@@ -1337,6 +1337,49 @@ impl Renderer {
         };
         sugarloaf.set_vi_mode_overlay(vi_mode_overlay);
 
+        // Set cursor glow overlay (semi-transparent halo around cursor cell)
+        let cursor_glow = {
+            let grid = context_manager.current_grid();
+            let ctx = grid.current();
+            let cursor = &ctx.renderable_content.cursor;
+
+            if cursor.state.is_visible() {
+                let pane_pos = grid.current_position();
+                let dim = &ctx.dimension;
+                let scale = dim.dimension.scale;
+
+                // Unscaled cell dimensions
+                let cell_w = dim.dimension.width / scale;
+                let cell_h = (dim.dimension.height / scale) * dim.line_height;
+
+                // Cursor grid position
+                let col = *cursor.state.pos.col;
+                let row = *cursor.state.pos.row as usize;
+
+                // Pixel position of the cursor cell (unscaled coordinates)
+                let cursor_x = pane_pos[0] + (col as f32) * cell_w;
+                let cursor_y = pane_pos[1] + (row as f32) * cell_h;
+
+                // Glow: expand beyond the cell by a padding amount
+                let glow_pad = cell_w * 1.5;
+                let glow_x = cursor_x - glow_pad;
+                let glow_y = cursor_y - glow_pad;
+                let glow_w = cell_w + glow_pad * 2.0;
+                let glow_h = cell_h + glow_pad * 2.0;
+
+                Some(Quad {
+                    position: [glow_x, glow_y],
+                    size: [glow_w, glow_h],
+                    color: [0.3, 0.5, 1.0, 0.15],
+                    border_radius: [glow_w / 2.0; 4],
+                    ..Quad::default()
+                })
+            } else {
+                None
+            }
+        };
+        sugarloaf.set_cursor_glow_overlay(cursor_glow);
+
         // Set progress bar from active terminal's progress state
         let progress_bar = {
             use rio_backend::ansi::ProgressState;

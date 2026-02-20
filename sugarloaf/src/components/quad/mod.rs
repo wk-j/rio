@@ -262,7 +262,12 @@ impl QuadBrush {
         render_pass.draw(0..6, 0..total as u32);
     }
 
-    /// Render a single quad directly without requiring it to be in state
+    /// Render a single quad directly without requiring it to be in state.
+    ///
+    /// WARNING: This writes to the shared instance buffer via queue.write_buffer.
+    /// If called multiple times before encoder.finish(), only the LAST write
+    /// is visible to ALL render passes (queue writes are not ordered with
+    /// encoder commands). Use `render_batch` for multiple overlays instead.
     pub fn render_single<'a>(
         &'a mut self,
         context: &mut Context,
@@ -289,5 +294,41 @@ impl QuadBrush {
         render_pass.set_bind_group(0, &self.constants, &[]);
         render_pass.set_vertex_buffer(0, self.instances.slice(..));
         render_pass.draw(0..6, 0..1);
+    }
+
+    /// Render multiple quads in a single instanced draw call.
+    /// All quads are written to the buffer and drawn in one pass.
+    /// Safe to use alongside other render passes (single write_buffer call).
+    pub fn render_batch<'a>(
+        &'a mut self,
+        context: &mut Context,
+        quads: &[Quad],
+        render_pass: &mut wgpu::RenderPass<'a>,
+    ) {
+        let total = quads.len();
+        if total == 0 {
+            return;
+        }
+
+        if total > self.supported_quantity {
+            self.instances.destroy();
+            self.supported_quantity = total;
+            self.instances = context.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("sugarloaf::quad batch instances"),
+                size: mem::size_of::<Quad>() as u64 * self.supported_quantity as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+
+        let instance_bytes = bytemuck::cast_slice(quads);
+        context
+            .queue
+            .write_buffer(&self.instances, 0, instance_bytes);
+
+        render_pass.set_pipeline(&self.pipeline);
+        render_pass.set_bind_group(0, &self.constants, &[]);
+        render_pass.set_vertex_buffer(0, self.instances.slice(..));
+        render_pass.draw(0..6, 0..total as u32);
     }
 }

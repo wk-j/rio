@@ -671,6 +671,23 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         }
     }
 
+    /// Get the screen-space position [x, y] of the current (focused) pane.
+    #[inline]
+    pub fn current_position(&self) -> [f32; 2] {
+        // Check quick terminal first
+        if let Some(ref qt) = self.quick_terminal {
+            if qt.visible && qt.item.val.route_id == self.current {
+                return qt.item.position();
+            }
+        }
+
+        if let Some(item) = self.inner.get(&self.current) {
+            item.position()
+        } else {
+            [0.0, 0.0]
+        }
+    }
+
     #[inline]
     pub fn extend_with_objects(
         &self,

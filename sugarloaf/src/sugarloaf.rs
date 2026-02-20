@@ -445,86 +445,60 @@ impl Sugarloaf<'_> {
                     self.rich_text_brush.render(&mut self.ctx, &mut rpass);
                 }
 
-                // Vi mode background tint overlay renders on top of content
-                if let Some(vi_overlay) = self.state.vi_mode_overlay {
-                    let mut overlay_pass =
-                        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            timestamp_writes: None,
-                            occlusion_query_set: None,
-                            label: Some("vi_mode_overlay"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                depth_slice: None,
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Load,
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                            multiview_mask: None,
-                        });
+                // Collect all overlay quads and render in a single pass.
+                // Using render_single for multiple overlays would clobber the shared
+                // instance buffer (queue.write_buffer is not ordered with encoder passes),
+                // so we batch them into one instanced draw call instead.
+                {
+                    let mut overlay_quads: Vec<Quad> = Vec::new();
 
-                    self.quad_brush.render_single(
-                        &mut self.ctx,
-                        &vi_overlay,
-                        &mut overlay_pass,
-                    );
-                }
+                    // Cursor glow (renders first / lowest)
+                    if let Some(glow) = self.state.cursor_glow_overlay {
+                        overlay_quads.push(glow);
+                    }
 
-                // Visual bell overlay requires separate render pass to appear on top of rich text
-                if let Some(bell_overlay) = self.state.visual_bell_overlay {
-                    let mut overlay_pass =
-                        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            timestamp_writes: None,
-                            occlusion_query_set: None,
-                            label: Some("visual_bell"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                depth_slice: None,
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Load, // Load existing content
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                            multiview_mask: None,
-                        });
+                    // Vi mode background tint
+                    if let Some(vi_overlay) = self.state.vi_mode_overlay {
+                        overlay_quads.push(vi_overlay);
+                    }
 
-                    // Render just the overlay quad directly
-                    self.quad_brush.render_single(
-                        &mut self.ctx,
-                        &bell_overlay,
-                        &mut overlay_pass,
-                    );
-                }
+                    // Visual bell flash
+                    if let Some(bell_overlay) = self.state.visual_bell_overlay {
+                        overlay_quads.push(bell_overlay);
+                    }
 
-                // Progress bar overlay at top of terminal
-                if let Some(progress_bar) = self.state.progress_bar {
-                    let mut overlay_pass =
-                        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            timestamp_writes: None,
-                            occlusion_query_set: None,
-                            label: Some("progress_bar"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                depth_slice: None,
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Load,
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                            multiview_mask: None,
-                        });
+                    // Progress bar
+                    if let Some(progress_bar) = self.state.progress_bar {
+                        overlay_quads.push(progress_bar);
+                    }
 
-                    self.quad_brush.render_single(
-                        &mut self.ctx,
-                        &progress_bar,
-                        &mut overlay_pass,
-                    );
+                    if !overlay_quads.is_empty() {
+                        let mut overlay_pass =
+                            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                                label: Some("overlays"),
+                                color_attachments: &[Some(
+                                    wgpu::RenderPassColorAttachment {
+                                        depth_slice: None,
+                                        view: &view,
+                                        resolve_target: None,
+                                        ops: wgpu::Operations {
+                                            load: wgpu::LoadOp::Load,
+                                            store: wgpu::StoreOp::Store,
+                                        },
+                                    },
+                                )],
+                                depth_stencil_attachment: None,
+                                multiview_mask: None,
+                            });
+
+                        self.quad_brush.render_batch(
+                            &mut self.ctx,
+                            &overlay_quads,
+                            &mut overlay_pass,
+                        );
+                    }
                 }
 
                 if self.graphics.bottom_layer.is_some()
@@ -567,5 +541,10 @@ impl Sugarloaf<'_> {
     #[inline]
     pub fn set_progress_bar(&mut self, progress_bar: Option<Quad>) {
         self.state.set_progress_bar(progress_bar);
+    }
+
+    #[inline]
+    pub fn set_cursor_glow_overlay(&mut self, overlay: Option<Quad>) {
+        self.state.set_cursor_glow_overlay(overlay);
     }
 }

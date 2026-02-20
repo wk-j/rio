@@ -23,6 +23,8 @@ pub struct SugarState {
     pub vi_mode_overlay: Option<Quad>,
     /// Progress bar overlay (rendered at top of terminal)
     pub progress_bar: Option<Quad>,
+    /// Cursor glow overlay (rendered behind/around the cursor cell)
+    pub cursor_glow_overlay: Option<Quad>,
 }
 
 impl SugarState {
@@ -46,6 +48,7 @@ impl SugarState {
             visual_bell_overlay: None,
             vi_mode_overlay: None,
             progress_bar: None,
+            cursor_glow_overlay: None,
         }
     }
 
@@ -303,5 +306,10 @@ impl SugarState {
     #[inline]
     pub fn set_progress_bar(&mut self, progress_bar: Option<Quad>) {
         self.progress_bar = progress_bar;
+    }
+
+    #[inline]
+    pub fn set_cursor_glow_overlay(&mut self, overlay: Option<Quad>) {
+        self.cursor_glow_overlay = overlay;
     }
 }
