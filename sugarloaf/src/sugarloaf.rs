@@ -3,6 +3,7 @@ pub mod primitives;
 pub mod state;
 
 use crate::components::core::{image::Handle, shapes::Rectangle};
+use crate::components::distortion::{DistortionBrush, DistortionParams};
 use crate::components::filters::{Filter, FiltersBrush};
 use crate::components::layer::{self, LayerBrush};
 use crate::components::quad::QuadBrush;
@@ -31,6 +32,7 @@ pub struct Sugarloaf<'a> {
     pub background_image: Option<ImageProperties>,
     pub graphics: Graphics,
     filters_brush: Option<FiltersBrush>,
+    distortion_brush: Option<DistortionBrush>,
 }
 
 #[derive(Debug)]
@@ -160,6 +162,7 @@ impl Sugarloaf<'_> {
             rich_text_brush,
             graphics: Graphics::default(),
             filters_brush: None,
+            distortion_brush: None,
         };
 
         Ok(instance)
@@ -242,6 +245,25 @@ impl Sugarloaf<'_> {
             if let Some(ref mut brush) = self.filters_brush {
                 brush.update_filters(&self.ctx, filters);
             }
+        }
+    }
+
+    /// Enable or disable distortion with the given parameters.
+    /// Pass `distortion_type = 0` (DISTORTION_NONE) to disable.
+    #[inline]
+    pub fn update_distortion(&mut self, params: DistortionParams) {
+        use crate::components::distortion::DISTORTION_NONE;
+        if params.distortion_type == DISTORTION_NONE {
+            self.distortion_brush = None;
+            return;
+        }
+
+        if self.distortion_brush.is_none() {
+            self.distortion_brush = Some(DistortionBrush::new(&self.ctx));
+        }
+
+        if let Some(ref mut brush) = self.distortion_brush {
+            brush.update_params(&self.ctx.queue, params);
         }
     }
 
@@ -504,6 +526,15 @@ impl Sugarloaf<'_> {
                 {
                     self.layer_brush.end_frame();
                     self.graphics.clear_top_layer();
+                }
+
+                if let Some(ref distortion_brush) = self.distortion_brush {
+                    distortion_brush.render(
+                        &self.ctx,
+                        &mut encoder,
+                        &frame.texture,
+                        &frame.texture,
+                    );
                 }
 
                 if let Some(ref mut filters_brush) = self.filters_brush {

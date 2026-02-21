@@ -47,8 +47,8 @@ use rio_backend::crosswords::pos::{Boundary, CursorState, Direction, Line};
 use rio_backend::crosswords::search::RegexSearch;
 use rio_backend::event::{ClickState, EventProxy, SearchState};
 use rio_backend::sugarloaf::{
-    layout::RootStyle, Sugarloaf, SugarloafErrors, SugarloafRenderer, SugarloafWindow,
-    SugarloafWindowSize,
+    layout::RootStyle, DistortionParams, Sugarloaf, SugarloafErrors, SugarloafRenderer,
+    SugarloafWindow, SugarloafWindowSize, DISTORTION_NONE, DISTORTION_PERSPECTIVE,
 };
 use rio_window::event::ElementState;
 use rio_window::event::Modifiers;
@@ -75,6 +75,22 @@ const MAX_SEARCH_WHILE_TYPING: Option<usize> = Some(1000);
 
 /// Maximum number of search terms stored in the history.
 const MAX_SEARCH_HISTORY_SIZE: usize = 255;
+
+/// Convert the config distortion settings into GPU-side params.
+fn distortion_params_from_config(
+    config: &rio_backend::config::Config,
+) -> DistortionParams {
+    use rio_backend::config::distortion::DistortionType;
+    let distortion_type = match config.distortion.effect {
+        DistortionType::None => DISTORTION_NONE,
+        DistortionType::Perspective => DISTORTION_PERSPECTIVE,
+    };
+    DistortionParams {
+        distortion_type,
+        strength: config.distortion.strength,
+        center: config.distortion.center,
+    }
+}
 
 pub struct Screen<'screen> {
     bindings: crate::bindings::KeyBindings,
@@ -181,6 +197,7 @@ impl Screen<'_> {
         };
 
         sugarloaf.update_filters(config.renderer.filters.as_slice());
+        sugarloaf.update_distortion(distortion_params_from_config(config));
 
         let renderer = Renderer::new(config, font_library);
 
@@ -383,6 +400,8 @@ impl Screen<'_> {
 
         self.sugarloaf
             .update_filters(config.renderer.filters.as_slice());
+        self.sugarloaf
+            .update_distortion(distortion_params_from_config(config));
         self.renderer = Renderer::new(config, font_library);
 
         for context_grid in self.context_manager.contexts_mut() {

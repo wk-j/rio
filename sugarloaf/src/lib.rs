@@ -19,6 +19,9 @@ pub use crate::sugarloaf::{
     Colorspace, Sugarloaf, SugarloafErrors, SugarloafRenderer, SugarloafWindow,
     SugarloafWindowSize, SugarloafWithErrors,
 };
+pub use components::distortion::{
+    DistortionParams, DISTORTION_NONE, DISTORTION_PERSPECTIVE,
+};
 pub use components::filters::Filter;
 pub use components::quad::Quad;
 pub use layout::{
