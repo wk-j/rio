@@ -212,6 +212,19 @@ pub struct CursorGlowConfig {
     /// a smoother, richer bloom effect. Default: 3.
     #[serde(default = "default_glow_layers")]
     pub layers: u8,
+
+    /// Enable cursor motion trail. When the cursor moves, fading
+    /// ghost quads are rendered along the path. Default: true.
+    #[serde(default = "default_trail_enabled")]
+    pub trail: bool,
+
+    /// Duration of the trail fade-out in seconds. Default: 0.35.
+    #[serde(default = "default_trail_duration", rename = "trail-duration")]
+    pub trail_duration: f32,
+
+    /// Number of ghost segments in the trail (2–12). Default: 6.
+    #[serde(default = "default_trail_segments", rename = "trail-segments")]
+    pub trail_segments: u8,
 }
 
 #[inline]
@@ -239,6 +252,21 @@ fn default_glow_layers() -> u8 {
     3
 }
 
+#[inline]
+fn default_trail_enabled() -> bool {
+    true
+}
+
+#[inline]
+fn default_trail_duration() -> f32 {
+    0.35
+}
+
+#[inline]
+fn default_trail_segments() -> u8 {
+    6
+}
+
 impl Default for CursorGlowConfig {
     fn default() -> Self {
         Self {
@@ -247,6 +275,9 @@ impl Default for CursorGlowConfig {
             intensity: default_glow_intensity(),
             radius: default_glow_radius(),
             layers: default_glow_layers(),
+            trail: default_trail_enabled(),
+            trail_duration: default_trail_duration(),
+            trail_segments: default_trail_segments(),
         }
     }
 }

@@ -53,8 +53,12 @@ pub struct QuadBrush {
     constants: wgpu::BindGroup,
     transform: wgpu::Buffer,
     instances: wgpu::Buffer,
-    // transform: wgpu::Buffer,
     supported_quantity: usize,
+    /// Separate instance buffer for overlay quads so that
+    /// `render_batch()` does not destroy/reallocate the buffer
+    /// used by the main `render()` pass within the same encoder.
+    overlay_instances: wgpu::Buffer,
+    overlay_supported_quantity: usize,
 }
 
 impl QuadBrush {
@@ -199,6 +203,14 @@ impl QuadBrush {
                     multiview_mask: None,
                 });
 
+        let overlay_supported_quantity = INITIAL_QUANTITY;
+        let overlay_instances = context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("sugarloaf::quad overlay instances"),
+            size: mem::size_of::<Quad>() as u64 * overlay_supported_quantity as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Self {
             supported_quantity,
             instances,
@@ -206,6 +218,8 @@ impl QuadBrush {
             transform,
             pipeline,
             current_transform: [0.0; 16],
+            overlay_instances,
+            overlay_supported_quantity,
         }
     }
 
@@ -297,8 +311,9 @@ impl QuadBrush {
     }
 
     /// Render multiple quads in a single instanced draw call.
-    /// All quads are written to the buffer and drawn in one pass.
-    /// Safe to use alongside other render passes (single write_buffer call).
+    /// Uses a separate overlay instance buffer so that growing
+    /// it does not destroy the buffer used by the main `render()`
+    /// pass within the same encoder submission.
     pub fn render_batch<'a>(
         &'a mut self,
         context: &mut Context,
@@ -310,25 +325,27 @@ impl QuadBrush {
             return;
         }
 
-        if total > self.supported_quantity {
-            self.instances.destroy();
-            self.supported_quantity = total;
-            self.instances = context.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("sugarloaf::quad batch instances"),
-                size: mem::size_of::<Quad>() as u64 * self.supported_quantity as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+        if total > self.overlay_supported_quantity {
+            self.overlay_instances.destroy();
+            self.overlay_supported_quantity = total;
+            self.overlay_instances =
+                context.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("sugarloaf::quad overlay instances"),
+                    size: mem::size_of::<Quad>() as u64
+                        * self.overlay_supported_quantity as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
         }
 
         let instance_bytes = bytemuck::cast_slice(quads);
         context
             .queue
-            .write_buffer(&self.instances, 0, instance_bytes);
+            .write_buffer(&self.overlay_instances, 0, instance_bytes);
 
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.constants, &[]);
-        render_pass.set_vertex_buffer(0, self.instances.slice(..));
+        render_pass.set_vertex_buffer(0, self.overlay_instances.slice(..));
         render_pass.draw(0..6, 0..total as u32);
     }
 }

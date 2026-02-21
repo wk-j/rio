@@ -29,7 +29,7 @@ use rio_backend::sugarloaf::{
     drawable_character, Content, FragmentStyle, FragmentStyleDecoration, Graphic, Quad,
     Stretch, Style, SugarCursor, Sugarloaf, UnderlineInfo, UnderlineShape, Weight,
 };
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::ops::RangeInclusive;
 
 use unicode_width::UnicodeWidthChar;
@@ -45,6 +45,18 @@ pub struct LeaderMenu {
     rich_text_id: Option<usize>,
     active: bool,
     items: Vec<rio_backend::config::leader::LeaderItem>,
+}
+
+/// A recorded cursor position for the motion trail effect.
+struct TrailEntry {
+    /// Pixel position of the cursor [x, y].
+    position: [f32; 2],
+    /// Cell size at the time of recording [width, height].
+    cell_size: [f32; 2],
+    /// Cursor shape at the time of recording.
+    cursor_shape: CursorShape,
+    /// When the cursor arrived at this position.
+    timestamp: std::time::Instant,
 }
 
 pub struct Renderer {
@@ -84,6 +96,14 @@ pub struct Renderer {
     /// When glow color is "cursor", this is updated each frame from
     /// the cursor color to track theme/ANSI overrides.
     glow_resolved_color: Option<[f32; 3]>,
+    // Cursor motion trail state
+    /// Previous cursor pixel position for detecting movement.
+    trail_last_pos: Option<[f32; 2]>,
+    /// Trail entries recording recent cursor positions.
+    trail_entries: VecDeque<TrailEntry>,
+    /// Set to true during `run()` when trail entries are still
+    /// fading out and the window needs continuous redraws.
+    pub trail_animating: bool,
 }
 
 /// Resolve the glow color from config. Returns `None` when
@@ -166,6 +186,9 @@ impl Renderer {
             is_game_mode_enabled: config.renderer.strategy.is_game(),
             glow_config: config.cursor.glow.clone(),
             glow_resolved_color: resolve_glow_color(&config.cursor.glow, &config.colors),
+            trail_last_pos: None,
+            trail_entries: VecDeque::new(),
+            trail_animating: false,
         };
 
         // Pre-populate font cache with common characters for better performance
@@ -1429,9 +1452,13 @@ impl Renderer {
         // a bloom effect behind the cursor cell. Shape adapts to
         // cursor type (block/beam/underline), color derived from
         // the cursor/theme color.
+        //
+        // When trail is enabled, fading ghost quads are rendered
+        // along the cursor's recent movement path.
         let cursor_glow_layers = {
             let glow = &self.glow_config;
             if !glow.enabled {
+                self.trail_animating = false;
                 vec![]
             } else {
                 let grid = context_manager.current_grid();
@@ -1439,6 +1466,7 @@ impl Renderer {
                 let cursor = &ctx.renderable_content.cursor;
 
                 if !cursor.state.is_visible() {
+                    self.trail_animating = false;
                     vec![]
                 } else {
                     let pane_pos = grid.current_position();
@@ -1461,19 +1489,121 @@ impl Renderer {
                         self.named_colors.cursor[2],
                     ]);
 
+                    let cursor_shape = cursor.state.content;
+
                     // Shape-aware base size: adapt to cursor shape
-                    let (base_w, base_h) = match cursor.state.content {
+                    let (base_w, base_h) = match cursor_shape {
                         CursorShape::Block => (cell_w, cell_h),
                         CursorShape::Beam => (2.0, cell_h),
                         CursorShape::Underline => (cell_w, 2.0),
                         CursorShape::Hidden => (cell_w, cell_h),
                     };
 
-                    let layers = glow.layers.clamp(1, 5) as usize;
+                    // --- Trail: detect movement and record ---
+                    let cur_pos = [cursor_x, cursor_y];
+                    if glow.trail {
+                        let moved = match self.trail_last_pos {
+                            Some(prev) => {
+                                (prev[0] - cur_pos[0]).abs() > 0.5
+                                    || (prev[1] - cur_pos[1]).abs() > 0.5
+                            }
+                            None => false,
+                        };
+                        if moved {
+                            // Record the OLD position as a trail
+                            // ghost before updating
+                            if let Some(prev) = self.trail_last_pos {
+                                self.trail_entries.push_back(TrailEntry {
+                                    position: prev,
+                                    cell_size: [cell_w, cell_h],
+                                    cursor_shape,
+                                    timestamp: std::time::Instant::now(),
+                                });
+                                // Cap entries to avoid unbounded
+                                // growth
+                                let max = glow.trail_segments.clamp(2, 12) as usize * 2;
+                                while self.trail_entries.len() > max {
+                                    self.trail_entries.pop_front();
+                                }
+                            }
+                        }
+                        self.trail_last_pos = Some(cur_pos);
+                    } else {
+                        self.trail_last_pos = None;
+                        self.trail_entries.clear();
+                    }
+
+                    // --- Trail: evict expired entries ---
+                    let trail_dur = std::time::Duration::from_secs_f32(
+                        glow.trail_duration.clamp(0.05, 2.0),
+                    );
+                    let now = std::time::Instant::now();
+                    while let Some(front) = self.trail_entries.front() {
+                        if now.duration_since(front.timestamp) >= trail_dur {
+                            self.trail_entries.pop_front();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // --- Trail: generate ghost quads ---
                     let intensity = glow.intensity.clamp(0.01, 1.0);
                     let radius = glow.radius.clamp(0.5, 5.0);
+                    let layers = glow.layers.clamp(1, 5) as usize;
 
-                    let mut quads = Vec::with_capacity(layers);
+                    let trail_count = self.trail_entries.len();
+                    let mut quads = Vec::with_capacity(trail_count + layers);
+
+                    for entry in self.trail_entries.iter() {
+                        let age = now.duration_since(entry.timestamp).as_secs_f32();
+                        let trail_secs = glow.trail_duration.clamp(0.05, 2.0);
+                        let fade = 1.0 - (age / trail_secs);
+                        if fade <= 0.0 {
+                            continue;
+                        }
+
+                        // Shape-aware size for the trail ghost
+                        let (tw, th) = match entry.cursor_shape {
+                            CursorShape::Block => {
+                                (entry.cell_size[0], entry.cell_size[1])
+                            }
+                            CursorShape::Beam => (2.0, entry.cell_size[1]),
+                            CursorShape::Underline => (entry.cell_size[0], 2.0),
+                            CursorShape::Hidden => {
+                                (entry.cell_size[0], entry.cell_size[1])
+                            }
+                        };
+
+                        // Single glow layer per trail ghost,
+                        // with padding proportional to the
+                        // outermost glow layer
+                        let pad = entry.cell_size[0] * radius * 0.6;
+                        let alpha = intensity * fade * 0.4;
+
+                        let gw = tw + pad * 2.0;
+                        let gh = th + pad * 2.0;
+                        let gx =
+                            entry.position[0] - pad + (entry.cell_size[0] - tw) / 2.0;
+                        let gy =
+                            entry.position[1] - pad + (entry.cell_size[1] - th) / 2.0;
+
+                        let br = match entry.cursor_shape {
+                            CursorShape::Underline => gh / 2.0,
+                            _ => gw.min(gh) / 2.0,
+                        };
+
+                        quads.push(Quad {
+                            position: [gx, gy],
+                            size: [gw, gh],
+                            color: [glow_rgb[0], glow_rgb[1], glow_rgb[2], alpha],
+                            border_radius: [br; 4],
+                            ..Quad::default()
+                        });
+                    }
+
+                    self.trail_animating = !self.trail_entries.is_empty();
+
+                    // --- Glow: concentric bloom layers ---
                     for i in (0..layers).rev() {
                         // Outer layers are larger with lower alpha
                         let t = (i as f32 + 1.0) / layers as f32;
@@ -1487,7 +1617,7 @@ impl Renderer {
 
                         // Adaptive border radius: fully round for
                         // block/beam, flatter for underline
-                        let br = match cursor.state.content {
+                        let br = match cursor_shape {
                             CursorShape::Underline => glow_h / 2.0,
                             _ => glow_w.min(glow_h) / 2.0,
                         };

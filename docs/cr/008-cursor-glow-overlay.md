@@ -229,9 +229,32 @@ impl QuadBrush {
 
 `queue.write_buffer()` is queued and only executes when `queue.submit()` is called (after `encoder.finish()`). By that time, only the **last** write (progress bar) is in the buffer. All four render passes read from the same buffer, so all four drew the progress bar quad.
 
-### Fix
+### Fix (Phase 1): Batched Overlay Rendering
 
-Collect all overlay quads into one `Vec`, write once, draw all instances in a single pass. The `render_single()` method is preserved (with a WARNING doc comment) for cases where only one overlay exists, but the overlay path in `render()` now exclusively uses `render_batch()`.
+Collect all overlay quads into one `Vec`, write once, draw all instances
+in a single pass. The `render_single()` method is preserved (with a
+WARNING doc comment) for cases where only one overlay exists, but the
+overlay path in `render()` now exclusively uses `render_batch()`.
+
+### Fix (Phase 2): Separate Overlay Instance Buffer
+
+The Phase 1 fix solved the multi-write clobbering but introduced a
+second latent bug: `render_batch()` and the main `render()` still shared
+the same `instances: wgpu::Buffer`. When `render_batch()` needed to grow
+the buffer (e.g., cursor trail adding more overlay quads than the initial
+capacity), it called `self.instances.destroy()` and allocated a new one.
+This destroyed the buffer that the main render pass had already bound via
+`set_vertex_buffer()`. Since both passes are submitted in the same
+`queue.submit()`, wgpu validation caught the destroyed buffer reference.
+
+**Symptom**: Panic with `"Buffer with 'sugarloaf::quad batch instances'
+label has been destroyed"` when opening a split (e.g., `Cmd+,` config
+editor) while cursor trail quads were active.
+
+**Fix**: Added a dedicated `overlay_instances` buffer and
+`overlay_supported_quantity` counter to `QuadBrush`. The main `render()`
+uses `self.instances` and `render_batch()` uses
+`self.overlay_instances`, so growing one never invalidates the other.
 
 ## Files Changed
 
@@ -239,9 +262,10 @@ Collect all overlay quads into one `Vec`, write once, draw all instances in a si
 |------|--------|
 | `sugarloaf/src/sugarloaf/state.rs` | Added `cursor_glow_overlay: Option<Quad>` field, init, setter |
 | `sugarloaf/src/sugarloaf.rs` | Added `set_cursor_glow_overlay()` API; replaced 4 separate overlay render passes with single batched pass |
-| `sugarloaf/src/components/quad/mod.rs` | Added `render_batch()` method; added WARNING doc comment on `render_single()` |
-| `frontends/rioterm/src/renderer/mod.rs` | Added cursor glow computation after vi_mode_overlay section |
+| `sugarloaf/src/components/quad/mod.rs` | Added `render_batch()` method with separate `overlay_instances` buffer; added WARNING doc comment on `render_single()` |
+| `frontends/rioterm/src/renderer/mod.rs` | Added cursor glow computation, trail state (`TrailEntry`, `VecDeque`), trail quad generation, `trail_animating` flag |
 | `frontends/rioterm/src/context/grid.rs` | Added `current_position()` method to `ContextGrid` |
+| `frontends/rioterm/src/application.rs` | Added `trail_animating` check to schedule redraws during trail fade-out |
 
 ## Dependencies
 
@@ -263,11 +287,14 @@ The cursor glow is fully configurable via `[cursor.glow]`:
 
 ```toml
 [cursor.glow]
-enabled = true        # toggle glow on/off
-color = "cursor"      # "cursor" = derive from cursor/theme color, or hex like "#FF79C6"
-intensity = 0.3       # base alpha for innermost layer (0.0–1.0)
-radius = 1.5          # padding multiplier relative to cell width
-layers = 3            # concentric glow layers (1–5) for bloom effect
+enabled = true          # toggle glow on/off
+color = "cursor"        # "cursor" = derive from cursor/theme color, or hex like "#FF79C6"
+intensity = 0.3         # base alpha for innermost layer (0.0–1.0)
+radius = 1.5            # padding multiplier relative to cell width
+layers = 3              # concentric glow layers (1–5) for bloom effect
+trail = true            # enable cursor motion trail
+trail-duration = 0.35   # trail fade-out duration in seconds (0.05–2.0)
+trail-segments = 6      # max ghost segments in the trail (2–12)
 ```
 
 ### Multi-Layer Bloom
@@ -291,9 +318,29 @@ When `color = "cursor"` (default), the glow RGB is derived from
 color overrides. Explicit hex values (e.g., `color = "#00BFFF"`) are
 resolved once at config load.
 
+### Cursor Motion Trail (Implemented)
+
+When `trail = true`, the renderer records the cursor's pixel position each
+frame into a `VecDeque<TrailEntry>`. When the cursor moves to a new position,
+the old position is pushed onto the deque. Each frame:
+
+1. **Eviction**: Entries older than `trail-duration` are removed from the front.
+2. **Quad generation**: For each remaining entry, a shape-aware ghost quad is
+   emitted with alpha that fades linearly from `intensity * 0.4` down to 0.
+3. **Ordering**: Trail quads are prepended to the glow layers vec (rendered
+   behind the current cursor glow).
+4. **Animation loop**: While trail entries exist, `trail_animating` is set to
+   `true` on the Renderer, and the application schedules continuous redraws
+   until the trail fully fades out.
+
+The trail adapts to cursor shape (block/beam/underline) and uses the same
+glow color as the main cursor glow.
+
 ## Future Work
 
-- **Animation**: Fade-in/out glow on cursor move or blink toggle
+- **Interpolated trail**: Add intermediate ghost positions between large cursor
+  jumps (e.g., page-up) for smoother visual continuity
+- **Trail-only mode**: Allow trail without the static glow bloom layers
 
 ## References
 

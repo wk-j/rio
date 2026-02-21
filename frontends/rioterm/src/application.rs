@@ -1640,6 +1640,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         &mut self.scheduler,
                         route.window.screen.ctx().current_route(),
                     );
+                } else if route.window.screen.renderer.trail_animating {
+                    // Cursor trail is fading out — schedule
+                    // next frame to continue the animation.
+                    route.schedule_redraw(
+                        &mut self.scheduler,
+                        route.window.screen.ctx().current_route(),
+                    );
                 }
 
                 event_loop.set_control_flow(ControlFlow::Wait);
