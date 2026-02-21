@@ -1665,8 +1665,8 @@ impl Renderer {
 
             if progress_state.is_visible() {
                 const PROGRESS_BAR_HEIGHT: f32 = 3.0;
-                // Animation duration in seconds (fast fill)
-                const ANIM_DURATION: f32 = 0.3;
+                // Animation duration in seconds
+                const ANIM_DURATION: f32 = 2.0;
 
                 let progress_ratio = match progress_state {
                     ProgressState::Normal { progress } => progress as f32 / 100.0,
@@ -1680,7 +1680,7 @@ impl Renderer {
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs_f32();
-                        let cycle = (time * 2.0) % 2.0;
+                        let cycle = (time * 1.0) % 2.0;
                         if cycle < 1.0 {
                             cycle
                         } else {
