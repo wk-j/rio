@@ -32,6 +32,20 @@ fn vs_main(
     return out;
 }
 
+/// Barrel / pincushion distortion.
+/// Positive strength = barrel (CRT bulge),
+/// negative = pincushion (inward pinch).
+fn barrel_distort(
+    uv: vec2<f32>,
+    center: vec2<f32>,
+    k: f32,
+) -> vec2<f32> {
+    let d = uv - center;
+    let r2 = dot(d, d);
+    let scale = 1.0 + k * r2;
+    return center + d * scale;
+}
+
 /// Perspective tilt around the center point.
 /// Simulates tilting the screen backward (positive strength)
 /// or forward (negative).
@@ -54,8 +68,12 @@ fn perspective_distort(
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var uv = input.tex_coords;
 
-    // 2 = perspective
-    if params.distortion_type == 2u {
+    // 1 = barrel, 2 = perspective
+    if params.distortion_type == 1u {
+        uv = barrel_distort(
+            uv, params.center, params.strength,
+        );
+    } else if params.distortion_type == 2u {
         uv = perspective_distort(
             uv, params.center, params.strength,
         );

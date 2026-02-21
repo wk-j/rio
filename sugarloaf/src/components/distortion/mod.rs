@@ -4,13 +4,14 @@ use std::mem;
 
 /// Distortion type constants matching the shader.
 pub const DISTORTION_NONE: u32 = 0;
+pub const DISTORTION_BARREL: u32 = 1;
 pub const DISTORTION_PERSPECTIVE: u32 = 2;
 
 /// GPU-side distortion parameters. Uploaded as a uniform buffer.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
 pub struct DistortionParams {
-    /// 0=none, 2=perspective
+    /// 0=none, 1=barrel, 2=perspective
     pub distortion_type: u32,
     /// Effect magnitude (can be negative for inverse)
     pub strength: f32,

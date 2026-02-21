@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub enum DistortionType {
     #[default]
     None,
+    /// Barrel/pincushion distortion (CRT curvature)
+    Barrel,
     /// Perspective tilt (vanishing point effect)
     Perspective,
 }
@@ -14,7 +16,7 @@ pub enum DistortionType {
 ///
 /// ```toml
 /// [distortion]
-/// effect = "perspective"
+/// effect = "barrel"
 /// strength = 0.3
 /// center = [0.5, 0.5]
 /// ```
@@ -87,6 +89,18 @@ mod tests {
         let config: DistortionConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.effect, DistortionType::None);
         assert_eq!(config.strength, 0.3);
+    }
+
+    #[test]
+    fn test_distortion_barrel_toml() {
+        let toml_str = r#"
+            effect = "barrel"
+            strength = 0.2
+        "#;
+        let config: DistortionConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.effect, DistortionType::Barrel);
+        assert_eq!(config.strength, 0.2);
+        assert_eq!(config.center, [0.5, 0.5]);
     }
 
     #[test]

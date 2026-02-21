@@ -48,7 +48,8 @@ use rio_backend::crosswords::search::RegexSearch;
 use rio_backend::event::{ClickState, EventProxy, SearchState};
 use rio_backend::sugarloaf::{
     layout::RootStyle, DistortionParams, Sugarloaf, SugarloafErrors, SugarloafRenderer,
-    SugarloafWindow, SugarloafWindowSize, DISTORTION_NONE, DISTORTION_PERSPECTIVE,
+    SugarloafWindow, SugarloafWindowSize, DISTORTION_BARREL, DISTORTION_NONE,
+    DISTORTION_PERSPECTIVE,
 };
 use rio_window::event::ElementState;
 use rio_window::event::Modifiers;
@@ -83,6 +84,7 @@ fn distortion_params_from_config(
     use rio_backend::config::distortion::DistortionType;
     let distortion_type = match config.distortion.effect {
         DistortionType::None => DISTORTION_NONE,
+        DistortionType::Barrel => DISTORTION_BARREL,
         DistortionType::Perspective => DISTORTION_PERSPECTIVE,
     };
     DistortionParams {
