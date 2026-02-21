@@ -171,6 +171,84 @@ pub struct CursorConfig {
     pub blinking: bool,
     #[serde(default = "default_cursor_interval", rename = "blinking-interval")]
     pub blinking_interval: u64,
+    #[serde(default)]
+    pub glow: CursorGlowConfig,
+}
+
+/// Configuration for the cursor glow effect — a soft halo rendered
+/// behind the cursor cell for improved discoverability.
+///
+/// ```toml
+/// [cursor.glow]
+/// enabled = true
+/// color = "cursor"       # "cursor" = derive from cursor color
+/// intensity = 0.3        # base alpha for innermost layer (0.0–1.0)
+/// radius = 1.5           # padding multiplier relative to cell width
+/// layers = 3             # number of concentric glow layers (1–5)
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CursorGlowConfig {
+    /// Whether the glow effect is enabled. Default: true.
+    #[serde(default = "default_glow_enabled")]
+    pub enabled: bool,
+
+    /// Glow color source. Accepts:
+    /// - `"cursor"` (default): derive from the cursor color
+    /// - A hex color string like `"#FF79C6"`
+    #[serde(default = "default_glow_color")]
+    pub color: String,
+
+    /// Base alpha intensity for the innermost glow layer (0.0–1.0).
+    /// Outer layers fade proportionally. Default: 0.3.
+    #[serde(default = "default_glow_intensity")]
+    pub intensity: f32,
+
+    /// Padding radius as a multiplier of cell width. Controls how
+    /// far the glow extends beyond the cursor. Default: 1.5.
+    #[serde(default = "default_glow_radius")]
+    pub radius: f32,
+
+    /// Number of concentric glow layers (1–5). More layers create
+    /// a smoother, richer bloom effect. Default: 3.
+    #[serde(default = "default_glow_layers")]
+    pub layers: u8,
+}
+
+#[inline]
+fn default_glow_enabled() -> bool {
+    true
+}
+
+#[inline]
+fn default_glow_color() -> String {
+    "cursor".to_string()
+}
+
+#[inline]
+fn default_glow_intensity() -> f32 {
+    0.3
+}
+
+#[inline]
+fn default_glow_radius() -> f32 {
+    1.5
+}
+
+#[inline]
+fn default_glow_layers() -> u8 {
+    3
+}
+
+impl Default for CursorGlowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_glow_enabled(),
+            color: default_glow_color(),
+            intensity: default_glow_intensity(),
+            radius: default_glow_radius(),
+            layers: default_glow_layers(),
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -643,6 +721,7 @@ impl Default for CursorConfig {
             shape: default_cursor(),
             blinking: false,
             blinking_interval: default_cursor_interval(),
+            glow: CursorGlowConfig::default(),
         }
     }
 }

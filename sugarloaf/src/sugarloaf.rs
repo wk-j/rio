@@ -452,10 +452,8 @@ impl Sugarloaf<'_> {
                 {
                     let mut overlay_quads: Vec<Quad> = Vec::new();
 
-                    // Cursor glow (renders first / lowest)
-                    if let Some(glow) = self.state.cursor_glow_overlay {
-                        overlay_quads.push(glow);
-                    }
+                    // Cursor glow layers (renders first / lowest)
+                    overlay_quads.extend_from_slice(&self.state.cursor_glow_layers);
 
                     // Vi mode background tint
                     if let Some(vi_overlay) = self.state.vi_mode_overlay {
@@ -544,7 +542,7 @@ impl Sugarloaf<'_> {
     }
 
     #[inline]
-    pub fn set_cursor_glow_overlay(&mut self, overlay: Option<Quad>) {
-        self.state.set_cursor_glow_overlay(overlay);
+    pub fn set_cursor_glow_layers(&mut self, layers: Vec<Quad>) {
+        self.state.set_cursor_glow_layers(layers);
     }
 }

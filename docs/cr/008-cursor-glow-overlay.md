@@ -257,12 +257,43 @@ Collect all overlay quads into one `Vec`, write once, draw all instances in a si
 - **Coexistence**: Cursor glow + vi_mode_overlay + progress_bar all render simultaneously
 - **Performance**: Single instanced draw call for all overlays (no per-overlay render pass overhead)
 
+## Configuration (Implemented)
+
+The cursor glow is fully configurable via `[cursor.glow]`:
+
+```toml
+[cursor.glow]
+enabled = true        # toggle glow on/off
+color = "cursor"      # "cursor" = derive from cursor/theme color, or hex like "#FF79C6"
+intensity = 0.3       # base alpha for innermost layer (0.0–1.0)
+radius = 1.5          # padding multiplier relative to cell width
+layers = 3            # concentric glow layers (1–5) for bloom effect
+```
+
+### Multi-Layer Bloom
+
+When `layers > 1`, concentric quads are rendered from outermost (largest,
+most transparent) to innermost (smallest, brightest). The alpha for each
+layer `i` (0 = outermost) is: `intensity * ((1 - t) * 0.8 + 0.2)` where
+`t = (i + 1) / layers`. This creates a smooth radial falloff.
+
+### Shape Awareness
+
+The glow adapts to the cursor shape:
+- **Block**: glow matches cell dimensions, fully rounded corners
+- **Beam**: narrow vertical glow (2px wide), centered on cursor column
+- **Underline**: flat horizontal glow (2px tall), centered on cursor row bottom
+
+### Theme Integration
+
+When `color = "cursor"` (default), the glow RGB is derived from
+`named_colors.cursor` each frame, tracking theme changes and ANSI cursor
+color overrides. Explicit hex values (e.g., `color = "#00BFFF"`) are
+resolved once at config load.
+
 ## Future Work
 
-- **Configuration**: Add config options for glow color, size multiplier, and enable/disable toggle
-- **Cursor shape awareness**: Adjust glow shape for beam vs block vs underline cursors
 - **Animation**: Fade-in/out glow on cursor move or blink toggle
-- **Theme integration**: Derive glow color from cursor color or theme accent color
 
 ## References
 

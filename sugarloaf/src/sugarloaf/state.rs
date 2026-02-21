@@ -23,8 +23,9 @@ pub struct SugarState {
     pub vi_mode_overlay: Option<Quad>,
     /// Progress bar overlay (rendered at top of terminal)
     pub progress_bar: Option<Quad>,
-    /// Cursor glow overlay (rendered behind/around the cursor cell)
-    pub cursor_glow_overlay: Option<Quad>,
+    /// Cursor glow overlay layers (rendered behind/around the cursor cell).
+    /// Multiple concentric quads create a bloom effect.
+    pub cursor_glow_layers: Vec<Quad>,
 }
 
 impl SugarState {
@@ -48,7 +49,7 @@ impl SugarState {
             visual_bell_overlay: None,
             vi_mode_overlay: None,
             progress_bar: None,
-            cursor_glow_overlay: None,
+            cursor_glow_layers: vec![],
         }
     }
 
@@ -309,7 +310,7 @@ impl SugarState {
     }
 
     #[inline]
-    pub fn set_cursor_glow_overlay(&mut self, overlay: Option<Quad>) {
-        self.cursor_glow_overlay = overlay;
+    pub fn set_cursor_glow_layers(&mut self, layers: Vec<Quad>) {
+        self.cursor_glow_layers = layers;
     }
 }

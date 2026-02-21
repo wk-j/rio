@@ -78,6 +78,33 @@ pub struct Renderer {
     font_context: rio_backend::sugarloaf::font::FontLibrary,
     font_cache: FontCache,
     char_cache: CharCache,
+    // Cursor glow config
+    glow_config: rio_backend::config::CursorGlowConfig,
+    /// Resolved glow color as [r, g, b] (alpha applied per-layer).
+    /// When glow color is "cursor", this is updated each frame from
+    /// the cursor color to track theme/ANSI overrides.
+    glow_resolved_color: Option<[f32; 3]>,
+}
+
+/// Resolve the glow color from config. Returns `None` when
+/// color = "cursor" (resolved per-frame from the runtime cursor
+/// color). Returns `Some([r, g, b])` for explicit hex colors.
+fn resolve_glow_color(
+    glow: &rio_backend::config::CursorGlowConfig,
+    colors: &Colors,
+) -> Option<[f32; 3]> {
+    if glow.color == "cursor" {
+        // Will be resolved per-frame from the cursor color
+        None
+    } else {
+        let arr = rio_backend::config::colors::hex_to_color_arr(&glow.color);
+        if arr[0] == 0.0 && arr[1] == 0.0 && arr[2] == 0.0 {
+            // Fallback: use cursor color from theme
+            Some([colors.cursor[0], colors.cursor[1], colors.cursor[2]])
+        } else {
+            Some([arr[0], arr[1], arr[2]])
+        }
+    }
 }
 
 impl Renderer {
@@ -137,6 +164,8 @@ impl Renderer {
             font_context: font_context.clone(),
             char_cache: CharCache::new(),
             is_game_mode_enabled: config.renderer.strategy.is_game(),
+            glow_config: config.cursor.glow.clone(),
+            glow_resolved_color: resolve_glow_color(&config.cursor.glow, &config.colors),
         };
 
         // Pre-populate font cache with common characters for better performance
@@ -1396,48 +1425,86 @@ impl Renderer {
         };
         sugarloaf.set_vi_mode_overlay(vi_mode_overlay);
 
-        // Set cursor glow overlay (semi-transparent halo around cursor cell)
-        let cursor_glow = {
-            let grid = context_manager.current_grid();
-            let ctx = grid.current();
-            let cursor = &ctx.renderable_content.cursor;
-
-            if cursor.state.is_visible() {
-                let pane_pos = grid.current_position();
-                let dim = &ctx.dimension;
-                let scale = dim.dimension.scale;
-
-                // Unscaled cell dimensions
-                let cell_w = dim.dimension.width / scale;
-                let cell_h = (dim.dimension.height / scale) * dim.line_height;
-
-                // Cursor grid position
-                let col = *cursor.state.pos.col;
-                let row = *cursor.state.pos.row as usize;
-
-                // Pixel position of the cursor cell (unscaled coordinates)
-                let cursor_x = pane_pos[0] + (col as f32) * cell_w;
-                let cursor_y = pane_pos[1] + (row as f32) * cell_h;
-
-                // Glow: expand beyond the cell by a padding amount
-                let glow_pad = cell_w * 1.5;
-                let glow_x = cursor_x - glow_pad;
-                let glow_y = cursor_y - glow_pad;
-                let glow_w = cell_w + glow_pad * 2.0;
-                let glow_h = cell_h + glow_pad * 2.0;
-
-                Some(Quad {
-                    position: [glow_x, glow_y],
-                    size: [glow_w, glow_h],
-                    color: [0.3, 0.5, 1.0, 0.15],
-                    border_radius: [glow_w / 2.0; 4],
-                    ..Quad::default()
-                })
+        // Build cursor glow layers: concentric quads that create
+        // a bloom effect behind the cursor cell. Shape adapts to
+        // cursor type (block/beam/underline), color derived from
+        // the cursor/theme color.
+        let cursor_glow_layers = {
+            let glow = &self.glow_config;
+            if !glow.enabled {
+                vec![]
             } else {
-                None
+                let grid = context_manager.current_grid();
+                let ctx = grid.current();
+                let cursor = &ctx.renderable_content.cursor;
+
+                if !cursor.state.is_visible() {
+                    vec![]
+                } else {
+                    let pane_pos = grid.current_position();
+                    let dim = &ctx.dimension;
+                    let scale = dim.dimension.scale;
+
+                    let cell_w = dim.dimension.width / scale;
+                    let cell_h = (dim.dimension.height / scale) * dim.line_height;
+
+                    let col = *cursor.state.pos.col;
+                    let row = *cursor.state.pos.row as usize;
+
+                    let cursor_x = pane_pos[0] + (col as f32) * cell_w;
+                    let cursor_y = pane_pos[1] + (row as f32) * cell_h;
+
+                    // Resolve glow color: from config or cursor color
+                    let glow_rgb = self.glow_resolved_color.unwrap_or([
+                        self.named_colors.cursor[0],
+                        self.named_colors.cursor[1],
+                        self.named_colors.cursor[2],
+                    ]);
+
+                    // Shape-aware base size: adapt to cursor shape
+                    let (base_w, base_h) = match cursor.state.content {
+                        CursorShape::Block => (cell_w, cell_h),
+                        CursorShape::Beam => (2.0, cell_h),
+                        CursorShape::Underline => (cell_w, 2.0),
+                        CursorShape::Hidden => (cell_w, cell_h),
+                    };
+
+                    let layers = glow.layers.clamp(1, 5) as usize;
+                    let intensity = glow.intensity.clamp(0.01, 1.0);
+                    let radius = glow.radius.clamp(0.5, 5.0);
+
+                    let mut quads = Vec::with_capacity(layers);
+                    for i in (0..layers).rev() {
+                        // Outer layers are larger with lower alpha
+                        let t = (i as f32 + 1.0) / layers as f32;
+                        let pad = cell_w * radius * t;
+                        let alpha = intensity * (1.0 - t) * 0.8 + intensity * 0.2;
+
+                        let glow_w = base_w + pad * 2.0;
+                        let glow_h = base_h + pad * 2.0;
+                        let glow_x = cursor_x - pad + (cell_w - base_w) / 2.0;
+                        let glow_y = cursor_y - pad + (cell_h - base_h) / 2.0;
+
+                        // Adaptive border radius: fully round for
+                        // block/beam, flatter for underline
+                        let br = match cursor.state.content {
+                            CursorShape::Underline => glow_h / 2.0,
+                            _ => glow_w.min(glow_h) / 2.0,
+                        };
+
+                        quads.push(Quad {
+                            position: [glow_x, glow_y],
+                            size: [glow_w, glow_h],
+                            color: [glow_rgb[0], glow_rgb[1], glow_rgb[2], alpha],
+                            border_radius: [br; 4],
+                            ..Quad::default()
+                        });
+                    }
+                    quads
+                }
             }
         };
-        sugarloaf.set_cursor_glow_overlay(cursor_glow);
+        sugarloaf.set_cursor_glow_layers(cursor_glow_layers);
 
         // Set progress bar from active terminal's progress state
         let progress_bar = {
