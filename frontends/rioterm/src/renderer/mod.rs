@@ -288,7 +288,7 @@ impl Renderer {
         focused_match: &Option<RangeInclusive<Pos>>,
         term_colors: &TermColors,
         is_active: bool,
-        force_opaque_bg: bool,
+        bg_opacity_override: Option<f32>,
     ) {
         // let start = std::time::Instant::now();
         let cursor = &renderable_content.cursor;
@@ -407,12 +407,17 @@ impl Renderer {
                 }
             }
 
-            // For overlay surfaces (e.g. quick terminal), force every cell to
-            // have an explicit opaque background so nothing shows through.
-            if force_opaque_bg && style.background_color.is_none() {
-                let mut bg = self.named_colors.background.0;
-                bg[3] = 1.0;
-                style.background_color = Some(bg);
+            // For overlay surfaces (e.g. quick terminal, command overlays),
+            // ensure cells have proper backgrounds. Cells with explicit
+            // ANSI colors (set by the program) keep their full opacity.
+            // Cells with the default background get the overlay's opacity
+            // so only the panel background is translucent.
+            if let Some(opacity) = bg_opacity_override {
+                if style.background_color.is_none() {
+                    let mut bg = self.named_colors.background.0;
+                    bg[3] = opacity;
+                    style.background_color = Some(bg);
+                }
             }
 
             if square.flags.contains(Flags::GRAPHICS) {
@@ -1141,7 +1146,7 @@ impl Renderer {
                             focused_match,
                             &terminal_snapshot.colors,
                             is_active,
-                            false,
+                            None,
                         );
                     }
                     content.build();
@@ -1171,7 +1176,7 @@ impl Renderer {
                                 focused_match,
                                 &terminal_snapshot.colors,
                                 is_active,
-                                false,
+                                None,
                             );
                         }
                     }
@@ -1244,7 +1249,7 @@ impl Renderer {
                         &None, // no focused match
                         &terminal_snapshot.colors,
                         is_active,
-                        true, // force opaque bg: QT is overlay, nothing behind it
+                        Some(1.0), // force opaque bg: QT is overlay
                     );
                 }
                 content.build();
@@ -1298,8 +1303,8 @@ impl Renderer {
                     None,  // no hint matches for command overlays
                     &None, // no focused match
                     &terminal_snapshot.colors,
-                    true, // always render as "active" (full opacity)
-                    true, // force opaque bg: overlay panel, nothing behind it
+                    true, // always render as "active"
+                    Some(grid.command_overlay_style.opacity),
                 );
             }
             content.build();

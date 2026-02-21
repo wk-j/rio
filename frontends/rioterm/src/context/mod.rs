@@ -22,7 +22,9 @@ use rio_backend::error::{RioError, RioErrorLevel, RioErrorType};
 use rio_backend::event::EventListener;
 use rio_backend::event::WindowId;
 use rio_backend::selection::SelectionRange;
-use rio_backend::sugarloaf::{font::SugarloafFont, Object, SugarloafErrors};
+use rio_backend::sugarloaf::{
+    font::SugarloafFont, layout::SugarDimensions, Object, SugarloafErrors,
+};
 use std::borrow::Cow;
 use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1123,7 +1125,12 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     /// full ANSI rendering. The overlay is click-through — keyboard input
     /// stays on the underlying pane. If the command is already running, its
     /// visibility is toggled. If not, a new PTY context is created.
-    pub fn toggle_command_overlay(&mut self, rich_text_id: usize, command: &str) {
+    pub fn toggle_command_overlay(
+        &mut self,
+        rich_text_id: usize,
+        command: &str,
+        overlay_dimensions: Option<SugarDimensions>,
+    ) {
         let grid = &mut self.contexts[self.current_index];
         let needs_creation = grid.toggle_command_overlay(command);
 
@@ -1188,10 +1195,11 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
         };
         let overlay_width = grid.width * bounds.width;
         let overlay_height = grid.height * bounds.height;
+        let cell_dimensions = overlay_dimensions.unwrap_or(current_dim.dimension);
         let dimension = grid::ContextDimension::build(
             overlay_width,
             overlay_height,
-            current_dim.dimension,
+            cell_dimensions,
             current_dim.line_height,
             grid.margin,
         );

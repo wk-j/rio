@@ -106,6 +106,7 @@ pub struct CommandOverlayStyle {
     pub width: f32,              // fractional size (default: 0.38)
     pub height: f32,             // fractional size (default: 0.55)
     pub opacity: f32,            // 0.0–1.0 (default: 1.0)
+    pub font_size: f32,          // points, 0.0 = use main font size
     pub border_radius: f32,      // pixels (default: 6.0)
     pub border_width: f32,       // pixels (default: 1.0)
     pub border_color: ColorArray, // hex or [0,0,0,0] = use split color
@@ -125,6 +126,7 @@ y = 0.05
 width = 0.38
 height = 0.55
 opacity = 0.95
+font-size = 12.0
 border-radius = 6.0
 border-width = 1.0
 border-color = '#44475a'
@@ -313,6 +315,7 @@ height = 0.55
 
 # Visual appearance
 opacity = 0.95
+font-size = 12.0  # 0.0 = use main terminal font size
 border-radius = 6.0
 border-width = 1.0
 border-color = '#44475a'

@@ -428,6 +428,17 @@ impl Screen<'_> {
         // Update command overlay style on all grids for hot-reload
         for context_grid in self.context_manager.contexts_mut() {
             context_grid.command_overlay_style = config.command_overlay;
+
+            // Update font size on existing command overlays
+            if config.command_overlay.has_custom_font_size() {
+                for overlay in &mut context_grid.command_overlays {
+                    let rt_id = overlay.item.context_mut().rich_text_id;
+                    self.sugarloaf.set_rich_text_font_size(
+                        &rt_id,
+                        config.command_overlay.font_size,
+                    );
+                }
+            }
         }
 
         if cfg!(target_os = "macos") {
@@ -755,8 +766,20 @@ impl Screen<'_> {
                     // Toggle a live command output overlay (real PTY)
                     let expanded = self.expand_leader_variables(overlay_str);
                     let rich_text_id = self.sugarloaf.create_rich_text();
-                    self.context_manager
-                        .toggle_command_overlay(rich_text_id, &expanded);
+                    let style = self.context_manager.config.command_overlay_style;
+                    let overlay_dims = if style.has_custom_font_size() {
+                        self.sugarloaf
+                            .set_rich_text_font_size(&rich_text_id, style.font_size);
+                        let layout = self.sugarloaf.rich_text_layout(&rich_text_id);
+                        Some(layout.dimensions)
+                    } else {
+                        None
+                    };
+                    self.context_manager.toggle_command_overlay(
+                        rich_text_id,
+                        &expanded,
+                        overlay_dims,
+                    );
                 }
 
                 self.render();
@@ -849,8 +872,20 @@ impl Screen<'_> {
             }
             Act::ToggleCommandOverlay(command) => {
                 let rich_text_id = self.sugarloaf.create_rich_text();
-                self.context_manager
-                    .toggle_command_overlay(rich_text_id, &command);
+                let style = self.context_manager.config.command_overlay_style;
+                let overlay_dims = if style.has_custom_font_size() {
+                    self.sugarloaf
+                        .set_rich_text_font_size(&rich_text_id, style.font_size);
+                    let layout = self.sugarloaf.rich_text_layout(&rich_text_id);
+                    Some(layout.dimensions)
+                } else {
+                    None
+                };
+                self.context_manager.toggle_command_overlay(
+                    rich_text_id,
+                    &command,
+                    overlay_dims,
+                );
             }
             Act::IncreaseFontSize => {
                 self.change_font_size(FontSizeAction::Increase);
@@ -1280,8 +1315,20 @@ impl Screen<'_> {
                     }
                     Act::ToggleCommandOverlay(ref command) => {
                         let rich_text_id = self.sugarloaf.create_rich_text();
-                        self.context_manager
-                            .toggle_command_overlay(rich_text_id, command);
+                        let style = self.context_manager.config.command_overlay_style;
+                        let overlay_dims = if style.has_custom_font_size() {
+                            self.sugarloaf
+                                .set_rich_text_font_size(&rich_text_id, style.font_size);
+                            let layout = self.sugarloaf.rich_text_layout(&rich_text_id);
+                            Some(layout.dimensions)
+                        } else {
+                            None
+                        };
+                        self.context_manager.toggle_command_overlay(
+                            rich_text_id,
+                            command,
+                            overlay_dims,
+                        );
                         self.render();
                     }
                     Act::ConfigEditor => {

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 /// width = 0.38
 /// height = 0.55
 /// opacity = 0.95
+/// font-size = 12.0
 /// border-radius = 6.0
 /// border-width = 1.0
 /// border-color = '#44475a'
@@ -48,6 +49,11 @@ pub struct CommandOverlayStyle {
     /// Default: 1.0.
     #[serde(default = "default_overlay_opacity")]
     pub opacity: f32,
+
+    /// Font size for the overlay panel in points.
+    /// When set to 0.0 (default), the main terminal font size is used.
+    #[serde(default = "default_overlay_font_size", rename = "font-size")]
+    pub font_size: f32,
 
     /// Corner rounding radius in scaled pixels.
     /// Set to 0.0 for sharp corners. Default: 6.0.
@@ -126,6 +132,11 @@ fn default_overlay_opacity() -> f32 {
 }
 
 #[inline]
+fn default_overlay_font_size() -> f32 {
+    0.0
+}
+
+#[inline]
 fn default_overlay_border_radius() -> f32 {
     6.0
 }
@@ -170,6 +181,7 @@ impl Default for CommandOverlayStyle {
             width: default_overlay_width(),
             height: default_overlay_height(),
             opacity: default_overlay_opacity(),
+            font_size: default_overlay_font_size(),
             border_radius: default_overlay_border_radius(),
             border_width: default_overlay_border_width(),
             border_color: default_overlay_border_color(),
@@ -194,5 +206,11 @@ impl CommandOverlayStyle {
     #[inline]
     pub fn has_custom_border_color(&self) -> bool {
         self.border_color[3] > 0.0
+    }
+
+    /// Returns true if a custom font size is configured (> 0.0).
+    #[inline]
+    pub fn has_custom_font_size(&self) -> bool {
+        self.font_size > 0.0
     }
 }
