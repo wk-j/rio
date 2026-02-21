@@ -374,6 +374,10 @@ impl Router<'_> {
                 program: editor.program,
                 args,
             },
+            // Must use spawn (not fork) so the editor program override
+            // actually takes effect instead of forking the login shell.
+            #[cfg(not(target_os = "windows"))]
+            use_fork: false,
             ..current_config
         };
 
@@ -408,6 +412,10 @@ impl Router<'_> {
                 program: editor.program,
                 args,
             },
+            // Must use spawn (not fork) so the editor program override
+            // actually takes effect instead of forking the login shell.
+            #[cfg(not(target_os = "windows"))]
+            use_fork: false,
             ..current_config
         };
 
