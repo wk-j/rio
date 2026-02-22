@@ -59,6 +59,9 @@ pub enum TerminalDamage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SoundEvent {
+    /// Played once on application startup (first window).
+    /// Falls back to WindowCreate if not configured.
+    Startup,
     Bell,
     WindowCreate,
     WindowClose,

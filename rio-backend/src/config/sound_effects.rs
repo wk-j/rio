@@ -24,6 +24,10 @@ impl SoundPaths {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SoundEffects {
+    /// Sound played once on application startup (first window).
+    /// If not set, falls back to `window_create`.
+    #[serde(default)]
+    pub startup: Option<SoundPaths>,
     #[serde(default)]
     pub bell: Option<SoundPaths>,
     #[serde(default)]
@@ -84,6 +88,7 @@ fn default_max_duration() -> f32 {
 impl Default for SoundEffects {
     fn default() -> Self {
         Self {
+            startup: None,
             bell: None,
             window_create: None,
             window_close: None,
@@ -130,6 +135,7 @@ impl SoundEffects {
         let mut map = HashMap::new();
 
         let mut entries: Vec<(SoundEvent, &Option<SoundPaths>)> = vec![
+            (SoundEvent::Startup, &self.startup),
             (SoundEvent::Bell, &self.bell),
             (SoundEvent::WindowCreate, &self.window_create),
             (SoundEvent::WindowClose, &self.window_close),

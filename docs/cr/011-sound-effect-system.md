@@ -62,6 +62,7 @@ TOML config
          enabled = true
          volume = 0.7
          keyboard-enabled = true
+         startup = "~/.config/rio/sounds/startup.mp3"
          bell = "~/.config/rio/sounds/bell.wav"
          window-create = "~/.config/rio/sounds/new_tab.mp3"
          window-close = "~/.config/rio/sounds/close_tab.mp3"
@@ -220,6 +221,8 @@ pub struct SoundEffects {
     /// Explicit sound file paths per event.
     /// Each field accepts a single path or a list of paths.
     #[serde(default)]
+    pub startup: Option<SoundPaths>,
+    #[serde(default)]
     pub bell: Option<SoundPaths>,
     #[serde(default)]
     pub window_create: Option<SoundPaths>,
@@ -268,6 +271,7 @@ fn default_max_duration() -> f32 { 5.0 }
 impl Default for SoundEffects {
     fn default() -> Self {
         Self {
+            startup: None,
             bell: None,
             window_create: None,
             window_close: None,
@@ -305,6 +309,7 @@ enabled = true
 volume = 0.5
 keyboard-enabled = true
 
+startup = "~/.config/rio/sounds/startup.mp3"
 bell = "~/.config/rio/sounds/bell.wav"
 window-create = "~/.config/rio/sounds/new_tab.mp3"
 window-close = "~/.config/rio/sounds/close_tab.mp3"
@@ -335,6 +340,7 @@ Sound files can live anywhere on disk. A recommended layout:
 ~/.config/rio/
 ├── rio.toml
 └── sounds/
+    ├── startup.mp3
     ├── bell.wav
     ├── new_tab.mp3
     ├── close_tab.mp3
@@ -390,6 +396,9 @@ Events with a single file path always play that file.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SoundEvent {
+    /// Played once on application startup (first window).
+    /// Falls back to WindowCreate if not configured.
+    Startup,
     Bell,
     WindowCreate,
     WindowClose,
@@ -467,7 +476,9 @@ Decoding uses `rodio::Decoder` (supports WAV, MP3, OGG, FLAC). The original samp
 - Add a `sound_manager: Option<SoundManager>` field to `Application`.
 - Initialize it in `Application::new()` if `config.sound_effects.enabled` and the `sound-effects` feature is enabled. Uses `SoundManager::new()` which returns `None` on audio device failure.
 - In `handle_audio_bell()`, call `sound_manager.play(SoundEvent::Bell)` if available.
-- In the `RioEvent::CreateWindow` and `RioEvent::CloseWindow` handlers, call `play(SoundEvent::WindowCreate/Close)`.
+- In `new_events(StartCause::Init)`, play `SoundEvent::Startup` if configured, otherwise fall back to `SoundEvent::WindowCreate`.
+- In `new_events(StartCause::CreateWindow | MacOSReopen)`, `RioEvent::CreateWindow`, and `open_urls()`, call `play(SoundEvent::WindowCreate)`.
+- In `RioEvent::CloseWindow` handlers, call `play(SoundEvent::WindowClose)`.
 - Add a handler for the new `RioEvent::PlaySound(event)` variant that delegates to `sound_manager.play(event)`.
 
 ### 5. Screen-Level Triggers — `frontends/rioterm/src/screen/mod.rs`
@@ -517,6 +528,13 @@ All new sound-effect code is guarded by `#[cfg(feature = "sound-effects")]`. If 
 
 ## Data Flow Examples
 
+### Startup
+
+1. Application launches → `new_events(StartCause::Init)` fires.
+2. After creating the first window, `Application` checks if `SoundEvent::Startup` has a cached sound.
+3. If yes, plays `SoundEvent::Startup`. If not, falls back to `SoundEvent::WindowCreate`.
+4. This ensures a dedicated startup sound (inspired by Opera GX splash screen audio) plays on launch, while users who only configure `window-create` still hear a sound.
+
 ### Window Create
 
 1. User presses `Super+N` → `Action::WindowCreateNew` → `Screen::process_action()` → `RioEvent::CreateWindow` sent via event proxy.
@@ -525,6 +543,8 @@ All new sound-effect code is guarded by `#[cfg(feature = "sound-effects")]`. If 
 4. `SoundManager` looks up the pre-cached `CachedSound` for the event (all sounds loaded eagerly at init).
 5. Plays via `stream_handle.play_raw()` — sound mixes concurrently with any other active sounds.
 6. Terminal continues rendering; sound plays in background.
+
+Note: Window creation also plays sounds for `StartCause::CreateWindow` (macOS menu/Cmd+N), `StartCause::MacOSReopen`, and `open_urls()` (macOS URL handler) — all using `SoundEvent::WindowCreate`.
 
 ### Keyboard Typing (Letter "A")
 

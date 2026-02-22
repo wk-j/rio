@@ -366,6 +366,22 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             self.align_windows_with(Some(new_id));
         }
 
+        #[cfg(feature = "sound-effects")]
+        if let Some(ref mut mgr) = self.sound_manager {
+            if cause == StartCause::Init {
+                // On startup, prefer the dedicated startup sound;
+                // fall back to the regular window-create sound.
+                let event = if mgr.has_sound(rio_backend::event::SoundEvent::Startup) {
+                    rio_backend::event::SoundEvent::Startup
+                } else {
+                    rio_backend::event::SoundEvent::WindowCreate
+                };
+                mgr.play(event);
+            } else {
+                mgr.play(rio_backend::event::SoundEvent::WindowCreate);
+            }
+        }
+
         // Schedule title updates every 2s
         let timer_id = TimerId::new(Topic::UpdateTitles, 0);
         if !self.scheduler.scheduled(timer_id) {
@@ -1072,6 +1088,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     Some(url),
                     self.app_id.as_deref(),
                 );
+
+                #[cfg(feature = "sound-effects")]
+                if let Some(ref mut mgr) = self.sound_manager {
+                    mgr.play(rio_backend::event::SoundEvent::WindowCreate);
+                }
             }
             return;
         }
