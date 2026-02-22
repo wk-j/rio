@@ -1196,12 +1196,19 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
         let overlay_width = grid.width * bounds.width;
         let overlay_height = grid.height * bounds.height;
         let cell_dimensions = overlay_dimensions.unwrap_or(current_dim.dimension);
+        // Floating overlays use zero margin — grid.margin includes
+        // title-bar / navigation padding that doesn't apply here.
+        let overlay_margin = grid::Delta {
+            x: 0.0,
+            top_y: 0.0,
+            bottom_y: 0.0,
+        };
         let dimension = grid::ContextDimension::build(
             overlay_width,
             overlay_height,
             cell_dimensions,
             current_dim.line_height,
-            grid.margin,
+            overlay_margin,
         );
 
         match ContextManager::create_context(

@@ -10,6 +10,7 @@ pub fn draw_leader_menu(
     colors: &Colors,
     items: &[LeaderItem],
     dimensions: (f32, f32, f32),
+    cell_height: f32,
 ) {
     let (width, height, scale) = dimensions;
     let scaled_width = width / scale;
@@ -18,9 +19,8 @@ pub fn draw_leader_menu(
     // Menu dimensions - auto-size based on items.
     // The rich text renderer skips empty lines (no runs), so only the
     // title line + N item lines contribute to rendered height.
-    // Line height for font_size 14.0 ≈ cell_height which is ~17px for
-    // most fonts.  Use that as the per-line estimate.
-    let line_height = 17.0;
+    // Use the actual cell height from the font metrics.
+    let line_height = cell_height;
     let top_padding = 8.0; // matches rich text Y offset
     let bottom_padding = 8.0;
     let rendered_lines = items.len() as f32 + 1.0; // title + items

@@ -1396,7 +1396,8 @@ impl Renderer {
             // Create rich text for leader menu if needed (use persistent, not temp)
             if self.leader_menu.rich_text_id.is_none() {
                 let leader_rich_text = sugarloaf.create_rich_text();
-                sugarloaf.set_rich_text_font_size(&leader_rich_text, 14.0);
+                let terminal_font_size = sugarloaf.style().font_size;
+                sugarloaf.set_rich_text_font_size(&leader_rich_text, terminal_font_size);
                 self.leader_menu.rich_text_id = Some(leader_rich_text);
             }
 
@@ -1404,12 +1405,18 @@ impl Renderer {
                 // Update rich text content with proper styling
                 self.update_leader_rich_text(sugarloaf.content(), rich_text_id);
 
+                // Get actual cell height from the rich text layout so
+                // the background quad matches the rendered content.
+                let layout = sugarloaf.rich_text_layout(&rich_text_id);
+                let cell_height = layout.dimensions.height / layout.dimensions.scale;
+
                 leader::draw_leader_menu(
                     &mut objects,
                     rich_text_id,
                     &self.named_colors,
                     &self.leader_menu.items,
                     (window_size.width, window_size.height, scale_factor),
+                    cell_height,
                 );
             }
         }
