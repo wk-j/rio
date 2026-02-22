@@ -872,10 +872,18 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             if !overlay.visible {
                 continue;
             }
-            let scale = overlay.item.val.dimension.dimension.scale;
+            let dim = &overlay.item.val.dimension;
+            let scale = dim.dimension.scale;
             let pos = overlay.item.position();
-            let overlay_w = overlay.item.val.dimension.width / scale;
-            let overlay_h = overlay.item.val.dimension.height / scale;
+            let overlay_w = dim.width / scale;
+
+            // Compute tight height from the actual terminal rows so the
+            // background quad does not extend past the last line.
+            // The PTY has `dim.lines` rows; each row is `char_height`
+            // logical pixels.  Add margins to get the final quad height.
+            let char_height = (dim.dimension.height / scale) * dim.line_height;
+            let margin_spaces = dim.margin.top_y + dim.margin.bottom_y;
+            let overlay_h = dim.lines as f32 * char_height + margin_spaces;
             let style = &self.command_overlay_style;
 
             // Background color for the overlay quad. The opacity only

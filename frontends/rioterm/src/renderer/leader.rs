@@ -15,12 +15,18 @@ pub fn draw_leader_menu(
     let scaled_width = width / scale;
     let scaled_height = height / scale;
 
-    // Menu dimensions - auto-size based on items
-    let item_height = 20.0;
-    let padding = 16.0;
+    // Menu dimensions - auto-size based on items.
+    // The rich text renderer skips empty lines (no runs), so only the
+    // title line + N item lines contribute to rendered height.
+    // Line height for font_size 14.0 ≈ cell_height which is ~17px for
+    // most fonts.  Use that as the per-line estimate.
+    let line_height = 17.0;
+    let top_padding = 8.0; // matches rich text Y offset
+    let bottom_padding = 8.0;
+    let rendered_lines = items.len() as f32 + 1.0; // title + items
     let menu_width = 220.0_f32.min(scaled_width - 20.0);
-    let menu_height =
-        (items.len() as f32 * item_height + padding * 4.0).min(scaled_height - 20.0);
+    let menu_height = (rendered_lines * line_height + top_padding + bottom_padding)
+        .min(scaled_height - 20.0);
 
     // Position at bottom-right with margin
     let margin = 10.0;
