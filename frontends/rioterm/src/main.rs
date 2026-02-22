@@ -20,6 +20,8 @@ mod renderer;
 mod router;
 mod scheduler;
 mod screen;
+#[cfg(feature = "sound-effects")]
+mod sound;
 mod watcher;
 
 use clap::Parser;

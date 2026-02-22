@@ -34,10 +34,10 @@ dev-debug:
 	MTL_HUD_ENABLED=1 RIO_LOG_LEVEL=debug make dev
 
 dev-debug-wayland:
-	RIO_LOG_LEVEL=debug cargo run -p rioterm --no-default-features --features=wayland
+	RIO_LOG_LEVEL=debug cargo run -p rioterm --no-default-features --features=wayland,sound-effects
 
 dev-debug-x11:
-	RIO_LOG_LEVEL=debug cargo run -p rioterm --no-default-features --features=x11
+	RIO_LOG_LEVEL=debug cargo run -p rioterm --no-default-features --features=x11,sound-effects
 
 run-wasm:
 	cargo build -p rioterm --target wasm32-unknown-unknown --lib
@@ -122,10 +122,10 @@ bump-brew:
 
 # TODO: Move to bin path
 release-x11:
-	RUSTFLAGS='-C link-arg=-s' cargo build --release --no-default-features --features=x11
+	RUSTFLAGS='-C link-arg=-s' cargo build --release --no-default-features --features=x11,sound-effects
 	target/release/rio
 release-wayland:
-	RUSTFLAGS='-C link-arg=-s' cargo build --release --no-default-features --features=wayland
+	RUSTFLAGS='-C link-arg=-s' cargo build --release --no-default-features --features=wayland,sound-effects
 	target/release/rio
 
 # Debian
@@ -133,13 +133,13 @@ release-wayland:
 # To install: sudo release/debian/rio_<version>_<architecture>_<feature>.deb
 # e.g: sudo release/debian/rio_0.0.13_arm64_wayland.deb
 release-debian-x11:
-	cargo deb -p rioterm -- --no-default-features --features=x11
+	cargo deb -p rioterm -- --no-default-features --features=x11,sound-effects
 	mkdir -p $(RELEASE_DIR)/debian/x11
 	mv $(TARGET_DIR_DEBIAN)/* $(RELEASE_DIR)/debian/x11/
 	cd $(RELEASE_DIR)/debian/x11 && rename 's/.deb/_x11.deb/g' *
 
 release-debian-wayland:
-	cargo deb -p rioterm -- --no-default-features --features=wayland
+	cargo deb -p rioterm -- --no-default-features --features=wayland,sound-effects
 	mkdir -p $(RELEASE_DIR)/debian/wayland
 	mv $(TARGET_DIR_DEBIAN)/* $(RELEASE_DIR)/debian/wayland/
 	cd $(RELEASE_DIR)/debian/wayland && rename 's/.deb/_wayland.deb/g' *
@@ -147,10 +147,10 @@ release-debian-wayland:
 # Release and Install
 install-debian-x11:
 	cargo install cargo-deb
-	cargo deb -p rioterm --install -- --release --no-default-features --features=x11
+	cargo deb -p rioterm --install -- --release --no-default-features --features=x11,sound-effects
 install-debian-wayland:
 	cargo install cargo-deb
-	cargo deb -p rioterm --install -- --release --no-default-features --features=wayland
+	cargo deb -p rioterm --install -- --release --no-default-features --features=wayland,sound-effects
 
 # cargo install cargo-wix
 # https://github.com/volks73/cargo-wix

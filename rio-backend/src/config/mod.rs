@@ -10,6 +10,7 @@ pub mod leader;
 pub mod navigation;
 pub mod platform;
 pub mod renderer;
+pub mod sound_effects;
 pub mod theme;
 pub mod title;
 pub mod window;
@@ -26,6 +27,7 @@ use crate::config::leader::Leader;
 use crate::config::navigation::Navigation;
 use crate::config::platform::{Platform, PlatformConfig};
 use crate::config::renderer::Renderer;
+use crate::config::sound_effects::SoundEffects;
 use crate::config::title::Title;
 use crate::config::window::Window;
 use colors::Colors;
@@ -165,6 +167,8 @@ pub struct Config {
     pub command_overlay: CommandOverlayStyle,
     #[serde(default)]
     pub distortion: DistortionConfig,
+    #[serde(default = "SoundEffects::default", rename = "sound-effects")]
+    pub sound_effects: SoundEffects,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -747,6 +751,7 @@ impl Default for Config {
             leader: Leader::default(),
             command_overlay: CommandOverlayStyle::default(),
             distortion: DistortionConfig::default(),
+            sound_effects: SoundEffects::default(),
         }
     }
 }

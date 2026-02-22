@@ -57,6 +57,21 @@ pub enum TerminalDamage {
     CursorOnly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SoundEvent {
+    Bell,
+    WindowCreate,
+    WindowClose,
+    TabCreate,
+    TabClose,
+    SplitCreate,
+    SplitClose,
+    KeyLetter,
+    KeyEnter,
+    KeySpace,
+    KeyBackspace,
+}
+
 #[derive(Clone)]
 pub enum RioEvent {
     PrepareRender(u64),
@@ -172,6 +187,9 @@ pub enum RioEvent {
     /// Update progress bar with command exit code (0 = success, non-zero = error).
     UpdateProgressBar(i32),
 
+    /// Play a sound effect for the given event.
+    PlaySound(SoundEvent),
+
     // No operation
     Noop,
 }
@@ -236,6 +254,9 @@ impl Debug for RioEvent {
             RioEvent::AlignWindows => write!(f, "AlignWindows"),
             RioEvent::CycleWindowNext => write!(f, "CycleWindowNext"),
             RioEvent::CycleWindowPrev => write!(f, "CycleWindowPrev"),
+            RioEvent::PlaySound(event) => {
+                write!(f, "PlaySound({event:?})")
+            }
             RioEvent::Noop => write!(f, "Noop"),
             RioEvent::Copy(_) => write!(f, "Copy"),
             RioEvent::Paste => write!(f, "Paste"),

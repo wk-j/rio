@@ -733,7 +733,34 @@ impl Screen<'_> {
             self.clear_selection();
 
             self.ctx_mut().current_mut().messenger.send_write(bytes);
+
+            // Emit keyboard sound event (if not a key repeat).
+            if !key.repeat {
+                self.emit_key_sound(key);
+            }
         }
+    }
+
+    /// Send a `PlaySound` event for the given sound event type.
+    fn emit_sound(&self, sound: rio_backend::event::SoundEvent) {
+        use rio_backend::event::{EventListener, RioEvent};
+        EventListener::send_event(
+            self.context_manager.event_proxy(),
+            RioEvent::PlaySound(sound),
+            self.context_manager.window_id(),
+        );
+    }
+
+    /// Send a `PlaySound` event for the given key press.
+    fn emit_key_sound(&self, key: &rio_window::event::KeyEvent) {
+        use rio_backend::event::SoundEvent;
+        let sound = match key.logical_key.as_ref() {
+            Key::Named(NamedKey::Enter) => SoundEvent::KeyEnter,
+            Key::Named(NamedKey::Space) => SoundEvent::KeySpace,
+            Key::Named(NamedKey::Backspace) => SoundEvent::KeyBackspace,
+            _ => SoundEvent::KeyLetter,
+        };
+        self.emit_sound(sound);
     }
 
     /// Handle input while leader menu is active
@@ -1598,14 +1625,14 @@ impl Screen<'_> {
     pub fn split_right(&mut self) {
         let rich_text_id = self.sugarloaf.create_rich_text();
         self.context_manager.split(rich_text_id, false);
-
+        self.emit_sound(rio_backend::event::SoundEvent::SplitCreate);
         self.render();
     }
 
     pub fn split_down(&mut self) {
         let rich_text_id = self.sugarloaf.create_rich_text();
         self.context_manager.split(rich_text_id, true);
-
+        self.emit_sound(rio_backend::event::SoundEvent::SplitCreate);
         self.render();
     }
 
@@ -1648,6 +1675,8 @@ impl Screen<'_> {
         let rich_text_id = self.sugarloaf.create_rich_text();
         self.context_manager.add_context(redirect, rich_text_id);
 
+        self.emit_sound(rio_backend::event::SoundEvent::TabCreate);
+
         self.cancel_search();
         self.render();
     }
@@ -1656,6 +1685,7 @@ impl Screen<'_> {
         if self.context_manager.current_grid_len() > 1 {
             self.clear_selection();
             self.context_manager.remove_current_grid();
+            self.emit_sound(rio_backend::event::SoundEvent::SplitClose);
             self.render();
         } else {
             self.close_tab();
@@ -1665,6 +1695,7 @@ impl Screen<'_> {
     pub fn close_tab(&mut self) {
         self.clear_selection();
         self.context_manager.close_current_context();
+        self.emit_sound(rio_backend::event::SoundEvent::TabClose);
 
         self.cancel_search();
         if self.ctx().len() <= 1 {

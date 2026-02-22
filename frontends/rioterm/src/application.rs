@@ -40,6 +40,8 @@ pub struct Application<'a> {
     /// When true, the next WindowEvent::Focused(true) should trigger align_windows().
     /// This is reset after the focus event is processed.
     keyboard_triggered_focus: bool,
+    #[cfg(feature = "sound-effects")]
+    sound_manager: Option<crate::sound::SoundManager>,
 }
 
 impl Application<'_> {
@@ -71,6 +73,9 @@ impl Application<'_> {
         #[cfg(target_os = "macos")]
         event_loop.set_confirm_before_quit(config.confirm_before_quit);
 
+        #[cfg(feature = "sound-effects")]
+        let sound_manager = Self::build_sound_manager(&config);
+
         Application {
             config,
             event_proxy,
@@ -78,7 +83,31 @@ impl Application<'_> {
             scheduler,
             app_id,
             keyboard_triggered_focus: false,
+            #[cfg(feature = "sound-effects")]
+            sound_manager,
         }
+    }
+
+    /// Build a SoundManager from the current config.
+    /// Returns `None` if sound effects are disabled, no sounds are
+    /// configured, or the audio device is unavailable.
+    #[cfg(feature = "sound-effects")]
+    fn build_sound_manager(
+        config: &rio_backend::config::Config,
+    ) -> Option<crate::sound::SoundManager> {
+        if !config.sound_effects.enabled {
+            return None;
+        }
+        let config_dir = rio_backend::config::config_dir_path();
+        let mapping = config.sound_effects.build_mapping(&config_dir);
+        if mapping.is_empty() {
+            return None;
+        }
+        crate::sound::SoundManager::new(
+            mapping,
+            config.sound_effects.volume,
+            config.sound_effects.max_duration,
+        )
     }
 
     fn skip_window_event(event: &WindowEvent) -> bool {
@@ -135,6 +164,18 @@ impl Application<'_> {
     }
 
     fn handle_audio_bell(&mut self) {
+        // If sound-effects feature is enabled and a bell sound is
+        // configured, use the SoundManager instead of the platform default.
+        #[cfg(feature = "sound-effects")]
+        {
+            if let Some(ref mut mgr) = self.sound_manager {
+                if mgr.has_sound(rio_backend::event::SoundEvent::Bell) {
+                    mgr.play(rio_backend::event::SoundEvent::Bell);
+                    return;
+                }
+            }
+        }
+
         #[cfg(target_os = "macos")]
         {
             // Use system bell sound on macOS
@@ -520,6 +561,12 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
                 self.config = config;
 
+                // Rebuild sound manager on config reload
+                #[cfg(feature = "sound-effects")]
+                {
+                    self.sound_manager = Self::build_sound_manager(&self.config);
+                }
+
                 let mut has_checked_adaptive_colors = false;
                 for (_id, route) in self.router.routes.iter_mut() {
                     // Apply system theme to ensure colors are consistent
@@ -838,6 +885,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 if self.config.window.auto_align {
                     self.align_windows_with(Some(new_id));
                 }
+
+                #[cfg(feature = "sound-effects")]
+                if let Some(ref mut mgr) = self.sound_manager {
+                    mgr.play(rio_backend::event::SoundEvent::WindowCreate);
+                }
             }
             #[cfg(target_os = "macos")]
             RioEventType::Rio(RioEvent::CreateNativeTab(working_dir_overwrite)) => {
@@ -878,6 +930,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
             #[cfg(target_os = "macos")]
             RioEventType::Rio(RioEvent::CloseWindow) => {
+                #[cfg(feature = "sound-effects")]
+                if let Some(ref mut mgr) = self.sound_manager {
+                    mgr.play(rio_backend::event::SoundEvent::WindowClose);
+                }
+
                 self.router.remove_window(&window_id);
                 if self.router.routes.is_empty() && !self.config.confirm_before_quit {
                     event_loop.exit();
@@ -993,6 +1050,12 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     route.window.screen.render();
                 }
             }
+            #[cfg(feature = "sound-effects")]
+            RioEventType::Rio(RioEvent::PlaySound(sound_event)) => {
+                if let Some(ref mut mgr) = self.sound_manager {
+                    mgr.play(sound_event);
+                }
+            }
             _ => {}
         }
     }
@@ -1059,6 +1122,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
         match event {
             WindowEvent::CloseRequested => {
+                #[cfg(feature = "sound-effects")]
+                if let Some(ref mut mgr) = self.sound_manager {
+                    mgr.play(rio_backend::event::SoundEvent::WindowClose);
+                }
+
                 // MacOS doesn't exit the loop
                 if cfg!(target_os = "macos") && self.config.confirm_before_quit {
                     self.router.remove_window(&window_id);

@@ -78,6 +78,7 @@ memmap2 = "0.9.5"
 url = "2.5.4"
 criterion = { version = "0.6.0", features = ["html_reports"] }
 dashmap = "6.1.0"
+rodio = { version = "0.19", default-features = false, features = ["wav", "mp3", "vorbis", "flac"] }
 
 [profile.release]
 strip = "symbols"           # See split-debuginfo - allows us to drop the size by ~65%

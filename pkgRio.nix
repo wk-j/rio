@@ -109,7 +109,7 @@ in
       '';
 
     buildNoDefaultFeatures = true;
-    buildFeatures = (lib.optionals withX11 ["x11"]) ++ (lib.optionals withWayland ["wayland"]);
+    buildFeatures = (lib.optionals withX11 ["x11"]) ++ (lib.optionals withWayland ["wayland"]) ++ ["sound-effects"];
     checkType = "debug";
     meta = {
       description = rioToml.package.description;
