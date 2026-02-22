@@ -728,8 +728,8 @@ pub fn default_key_bindings(config: &rio_backend::config::Config) -> Vec<KeyBind
         Key::Named(ArrowRight), ModifiersState::SUPER, ~BindingMode::VI; Action::None;
         // Auto window alignment: Cmd+Shift+> (Cmd+Shift+.) and Cmd+Shift+< (Cmd+Shift+,)
         // key_without_modifiers() strips shift, so we match on "." and ","
-        ".", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
-        ",", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
+        ".", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
+        ",", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
         "r", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
         "0",                          +BindingMode::VI, ~BindingMode::SEARCH;
             ViMotion::First;
@@ -1126,8 +1126,8 @@ pub fn platform_key_bindings(
         Key::Named(ArrowDown), +BindingMode::SEARCH; SearchAction::SearchHistoryNext;
         // Auto window alignment: Alt+Shift+> and Alt+Shift+<
         // key_without_modifiers() strips shift, so we match on "." and ","
-        ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
-        ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
+        ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
+        ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
         "r", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
     );
 
@@ -1219,8 +1219,8 @@ pub fn platform_key_bindings(
         Key::Named(ArrowDown), +BindingMode::SEARCH; SearchAction::SearchHistoryNext;
         // Auto window alignment: Alt+Shift+> (Alt+Shift+.) and Alt+Shift+< (Alt+Shift+,)
         // key_without_modifiers() strips shift, so we match on "." and ","
-        ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
-        ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
+        ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
+        ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
         "r", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
     );
 
