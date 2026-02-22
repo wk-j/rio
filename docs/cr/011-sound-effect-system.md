@@ -1,6 +1,6 @@
 # CR-011: Sound Effect System
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-02-22
 **Author:** wk
 
@@ -108,14 +108,18 @@ pub struct SoundManager {
     indices: HashMap<SoundEvent, usize>,
     /// Global volume (0.0–1.0).
     volume: f32,
+    /// Maximum duration in seconds per sound file.
+    max_duration: f32,
 }
 
 impl SoundManager {
     /// Attempt to create a SoundManager. Returns `None` if the audio
     /// device is unavailable (e.g., headless server, no sound card).
+    /// All sound files are eagerly decoded and cached at construction.
     pub fn new(
         mapping: HashMap<SoundEvent, Vec<PathBuf>>,
         volume: f32,
+        max_duration: f32,
     ) -> Option<Self> {
         let (_stream, stream_handle) =
             rodio::OutputStream::try_default()
@@ -127,14 +131,25 @@ impl SoundManager {
                     e
                 })
                 .ok()?;
-        Some(Self {
+
+        let mut mgr = Self {
             cache: HashMap::new(),
             _stream,
             stream_handle,
             mapping,
             indices: HashMap::new(),
             volume,
-        })
+            max_duration,
+        };
+
+        // Pre-load all sound files into cache
+        mgr.load_all();
+
+        Some(mgr)
+    }
+
+    pub fn has_sound(&self, event: SoundEvent) -> bool {
+        self.cache.get(&event).map(|v| !v.is_empty()).unwrap_or(false)
     }
 
     pub fn play(&mut self, event: SoundEvent) {
@@ -149,7 +164,7 @@ impl SoundManager {
             let source = rodio::buffer::SamplesBuffer::new(
                 sound.channels,
                 sound.sample_rate,
-                sound.samples.as_ref().clone(),
+                (*sound.samples).clone(),
             )
             .amplify(self.volume);
 
@@ -168,6 +183,8 @@ impl SoundManager {
 - Each `CachedSound` stores the original sample rate and channel count from decoding, avoiding hardcoded assumptions.
 - Buffers use `Arc<Vec<f32>>` so cloning for playback is cheap (reference count increment, not a full copy).
 - `SoundManager::new()` returns `Option<Self>` — if the audio device is unavailable, the system degrades gracefully and `Application` stores `None`.
+- All sound files are **eagerly decoded and cached** at construction time via `load_all()`. This avoids decode latency on first play. Files that fail to open, decode, or exceed `max_duration` are skipped with `tracing::warn!()`.
+- `Application::build_sound_manager()` is a static helper that checks `config.sound_effects.enabled`, builds the mapping, and constructs the `SoundManager`. It returns `None` if disabled, no sounds configured, or audio device unavailable. Both types (Serialize + Deserialize) are derived on config structs because `Config` derives `Serialize` for its `to_string()` method.
 
 ## Design
 
@@ -177,11 +194,11 @@ impl SoundManager {
 // rio-backend/src/config/sound_effects.rs
 
 use std::path::PathBuf;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A sound entry can be a single path or a list of paths (variants).
 /// When multiple paths are provided, they are rotated via round-robin.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum SoundPaths {
     Single(PathBuf),
@@ -197,7 +214,7 @@ impl SoundPaths {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SoundEffects {
     /// Explicit sound file paths per event.
@@ -433,7 +450,7 @@ pub sound_effects: SoundEffects,
 
 Add a method `SoundEffects::build_mapping()` that converts the config fields into a `HashMap<SoundEvent, Vec<PathBuf>>`. Each `Option<SoundPaths>` field maps to a `SoundEvent` key. `None` fields are omitted. Paths are resolved (tilde expansion, relative-to-config-dir). Files exceeding `max_duration` are skipped with a warning log.
 
-### 3. SoundManager — `frontends/rioterm/src/sound/mod.rs`
+### 3. SoundManager — `frontends/rioterm/src/sound.rs`
 
 New module that:
 - Holds a `rodio::OutputStream` (kept alive) and `rodio::OutputStreamHandle`.
@@ -460,13 +477,17 @@ Screen does not hold a reference to `SoundManager`. Instead, it sends sound even
 - For tab/split events triggered by `Action` variants, `Screen::process_action()` sends `RioEvent::PlaySound(SoundEvent::TabCreate)` (etc.) via the event proxy after dispatching the action.
 - Tab close vs. split close is distinguished by inspecting `ContextManager` state: if the closed context is the sole pane in its tab, it is a `TabClose`; otherwise it is a `SplitClose`.
 
-Keyboard sounds are triggered in `Screen::process_key_event()` when `config.sound_effects.keyboard_enabled` is true. The method inspects the key event:
+Keyboard sounds are triggered in `Screen::process_key_event()` via a helper method `emit_key_sound()`. The method inspects the key event:
 - Letters, digits, symbols → `SoundEvent::KeyLetter`
 - `NamedKey::Enter` → `SoundEvent::KeyEnter`
 - `NamedKey::Space` → `SoundEvent::KeySpace`
 - `NamedKey::Backspace` → `SoundEvent::KeyBackspace`
 
-Only key-press events (`ElementState::Pressed`) trigger sounds. Key repeats are filtered using `KeyEvent::repeat` — if `key_event.repeat` is `true`, no sound is played.
+Only key-press events (`ElementState::Pressed`) that produce terminal input trigger sounds. Key repeats are filtered using `KeyEvent::repeat` — if `key_event.repeat` is `true`, no sound is played.
+
+The `keyboard_enabled` toggle is enforced in `SoundEffects::build_mapping()` — when `false`, keyboard sound events (KeyLetter, KeyEnter, KeySpace, KeyBackspace) are excluded from the mapping entirely, so `SoundManager` never has them cached. Screen always sends `PlaySound` events for key presses; they become no-ops at the Application level if no keyboard sounds are in the mapping.
+
+A separate `emit_sound()` helper on `Screen` sends `RioEvent::PlaySound` via the `EventListener` trait method (using fully-qualified syntax to disambiguate from the inherent `EventProxy::send_event` method which takes `RioEventType`).
 
 ### 6. Feature Gating
 
@@ -478,21 +499,21 @@ A new feature flag `sound-effects` is introduced, separate from the existing `au
 rodio = { version = "0.19", optional = true, default-features = false, features = ["wav", "mp3", "vorbis", "flac"] }
 
 [features]
-default = ["wayland", "x11"]
+default = ["wayland", "x11", "sound-effects"]
 audio = ["cpal"]                    # existing: Linux/BSD sine-wave bell
 sound-effects = ["rodio"]           # new: cross-platform file-based sounds
 ```
 
-Note: `rodio` is added as a **non-platform-conditional** dependency so it works on macOS, Windows, and Linux. The existing `audio` feature (Linux-only `cpal` sine-wave bell) remains unchanged.
+Note: `rodio` is added as a **non-platform-conditional** dependency so it works on macOS, Windows, and Linux. The existing `audio` feature (Linux-only `cpal` sine-wave bell) remains unchanged. The `sound-effects` feature is included in `default` features so it is active for macOS/Windows builds and `make dev`/`make run`. Linux `--no-default-features` build targets (Makefile, GoReleaser, Nix) explicitly add `sound-effects` to their `--features` lists.
 
-All new sound-effect code is guarded by `#[cfg(feature = "sound-effects")]`. If the feature is disabled, `SoundManager` is not compiled and `Application` stores `sound_manager: None` unconditionally.
+All new sound-effect code is guarded by `#[cfg(feature = "sound-effects")]`. If the feature is disabled, `SoundManager` is not compiled and the `sound_manager` field is omitted from `Application` entirely.
 
 ### 7. Key Repeat, Volume Control, and Config Reload
 
 - **Key repeat**: Filtered by checking `key_event.repeat`. If `true`, no `RioEvent::PlaySound` is sent. This is a direct boolean check on the `KeyEvent` struct provided by `rio-window`, not a time-based debounce.
 - **Volume scaling**: The `sound_effects.volume` field is passed to `SoundManager` at construction time. Each played buffer is wrapped with `rodio::Source::amplify(volume)` before being sent to the mixer.
-- **Keyboard-only toggle**: The `keyboard_enabled` flag allows users to keep window/bell sounds while disabling typing sounds.
-- **Config hot-reload**: When `RioEvent::UpdateConfig` is received in `Application`, the sound manager is re-initialized if `sound_effects` settings have changed. The old `SoundManager` is dropped (which stops the output stream), and a new one is created with the updated mapping and volume. The audio cache is rebuilt from scratch — this is acceptable because config reloads are infrequent.
+- **Keyboard-only toggle**: The `keyboard_enabled` flag allows users to keep window/bell sounds while disabling typing sounds. This is enforced at the mapping level in `build_mapping()` — when `false`, keyboard events are excluded from the `HashMap`, so `SoundManager` never loads them.
+- **Config hot-reload**: When `RioEvent::UpdateConfig` is received in `Application`, the sound manager is unconditionally rebuilt via `Application::build_sound_manager()`. The old `SoundManager` is dropped (which stops the output stream and releases cached buffers), and a new one is created with the updated mapping, volume, and max_duration. The audio cache is rebuilt from scratch — this is acceptable because config reloads are infrequent.
 
 ## Data Flow Examples
 
@@ -500,46 +521,53 @@ All new sound-effect code is guarded by `#[cfg(feature = "sound-effects")]`. If 
 
 1. User presses `Super+N` → `Action::WindowCreateNew` → `Screen::process_action()` → `RioEvent::CreateWindow` sent via event proxy.
 2. `Application::handle_event()` receives `RioEventType::Rio(RioEvent::CreateWindow)`.
-3. `Application` calls `self.sound_manager.as_mut().map(|m| m.play(SoundEvent::WindowCreate))`.
-4. `SoundManager` looks up the `CachedSound` for the event.
-5. If cache miss, loads the file via `rodio::Decoder`, stores `CachedSound` with original sample rate/channels.
-6. Plays via `stream_handle.play_raw()` — sound mixes concurrently with any other active sounds.
-7. Terminal continues rendering; sound plays in background.
+3. After creating the window, `Application` calls `self.sound_manager.as_mut().map(|m| m.play(SoundEvent::WindowCreate))`.
+4. `SoundManager` looks up the pre-cached `CachedSound` for the event (all sounds loaded eagerly at init).
+5. Plays via `stream_handle.play_raw()` — sound mixes concurrently with any other active sounds.
+6. Terminal continues rendering; sound plays in background.
 
 ### Keyboard Typing (Letter "A")
 
 1. User presses `A` key → `Screen::process_key_event()` called with `KeyEvent`.
-2. `key_event.repeat` is `false` and `config.sound_effects.keyboard_enabled` is `true`, key is a letter → `SoundEvent::KeyLetter`.
-3. `Screen` sends `RioEvent::PlaySound(SoundEvent::KeyLetter)` via the `EventProxy`.
-4. `Application` receives the event and calls `sound_manager.play(SoundEvent::KeyLetter)`.
-5. `SoundManager` picks the next variant (e.g., `key3.wav`) via round-robin.
-6. Buffer already cached; plays via `play_raw()` — concurrent with any other sounds.
-7. Sound plays while the character is sent to the PTY (parallel, non-blocking).
+2. After bytes are sent to the terminal, `key_event.repeat` is checked — it is `false`, so `emit_key_sound()` is called.
+3. `emit_key_sound()` classifies the key as `SoundEvent::KeyLetter` and calls `emit_sound()`.
+4. `emit_sound()` sends `RioEvent::PlaySound(SoundEvent::KeyLetter)` via `EventListener::send_event()`.
+5. `Application` receives the event and calls `sound_manager.play(SoundEvent::KeyLetter)`.
+6. `SoundManager` picks the next variant (e.g., `key3.wav`) via round-robin index.
+7. Buffer already cached; plays via `play_raw()` — concurrent with any other sounds.
+8. Sound plays while the character is sent to the PTY (parallel, non-blocking).
+
+Note: If `keyboard_enabled` is `false` in the config, keyboard events are excluded from the mapping at build time, so `SoundManager` has no cached sounds for them. The `play()` call becomes a no-op (no matching entry in `cache`).
 
 ### Tab Close vs. Split Close
 
-1. User presses `Ctrl+W` → `Action::CloseTerminal` → `Screen::process_action()`.
-2. Before closing, `Screen` checks `ContextManager`: if the current context is the only pane in its tab, this is a `TabClose`; otherwise it is a `SplitClose`.
-3. `Screen` sends `RioEvent::PlaySound(SoundEvent::TabClose)` or `RioEvent::PlaySound(SoundEvent::SplitClose)` accordingly.
+1. User presses the close keybinding → `Action::CloseCurrentSplitOrTab` → `Screen::close_split_or_tab()`.
+2. `close_split_or_tab()` checks `context_manager.current_grid_len()`: if greater than 1, it removes the current split and emits `SoundEvent::SplitClose`; otherwise it calls `close_tab()` which emits `SoundEvent::TabClose`.
+3. The sound event is sent via `emit_sound()` → `EventListener::send_event()` → `RioEvent::PlaySound`.
 4. `Application` receives and plays the appropriate sound.
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `rio-backend/src/config/sound_effects.rs` | **NEW** — `SoundEffects`, `SoundPaths` types, mapping builder |
-| `rio-backend/src/config/mod.rs` | Add `pub mod sound_effects`, include field in `Config` |
-| `rio-backend/src/event/mod.rs` | Add `SoundEvent` enum, add `RioEvent::PlaySound(SoundEvent)` variant |
-| `frontends/rioterm/src/sound/mod.rs` | **NEW** — `SoundManager` with rodio integration |
-| `frontends/rioterm/src/application.rs` | Add `sound_manager` field, init, playback calls, `PlaySound` handler, config reload |
-| `frontends/rioterm/src/screen/mod.rs` | Send `RioEvent::PlaySound` for tab/split actions and keyboard events |
-| `frontends/rioterm/Cargo.toml` | Add `rodio` dependency (non-platform-conditional), `sound-effects` feature |
+| `rio-backend/src/config/sound_effects.rs` | **NEW** — `SoundEffects`, `SoundPaths` types, mapping builder, unit tests |
+| `rio-backend/src/config/mod.rs` | Add `pub mod sound_effects`, import, include field in `Config` with `#[serde(rename = "sound-effects")]` |
+| `rio-backend/src/event/mod.rs` | Add `SoundEvent` enum, `RioEvent::PlaySound(SoundEvent)` variant, `Debug` match arm |
+| `frontends/rioterm/src/sound.rs` | **NEW** — `SoundManager` with rodio integration, eager caching, round-robin |
+| `frontends/rioterm/src/main.rs` | Add `#[cfg(feature = "sound-effects")] mod sound;` |
+| `frontends/rioterm/src/application.rs` | Add `sound_manager` field, `build_sound_manager()` helper, init in `new()`, `PlaySound` handler, bell override, window create/close sounds, config reload rebuild |
+| `frontends/rioterm/src/screen/mod.rs` | Add `emit_sound()` and `emit_key_sound()` helpers, send `PlaySound` for tab/split/keyboard events |
+| `frontends/rioterm/Cargo.toml` | Add `rodio` optional dependency, `sound-effects` feature (included in `default`) |
 | `Cargo.toml` (workspace) | Add `rodio` to workspace dependencies |
+| `Makefile` | Add `sound-effects` to all `--no-default-features` build targets |
+| `.goreleaser.yaml` | Add `sound-effects` to all Linux `--no-default-features` build flags |
+| `pkgRio.nix` | Add `"sound-effects"` to `buildFeatures` |
 
 ## Dependencies
 
-- **New crate**: `rodio` (MIT/Apache-2.0) for audio playback, decoding, and mixing. Added as a cross-platform optional dependency under the `sound-effects` feature.
-- **Existing infrastructure**: `RioEvent` system, config parsing, `EventProxy`.
+- **New crate**: `rodio` v0.19 (MIT/Apache-2.0) for audio playback, decoding, and mixing. Added as a cross-platform optional dependency under the `sound-effects` feature. Configured with `default-features = false` and explicit format features: `wav`, `mp3`, `vorbis`, `flac`.
+- **Transitive crates**: `rodio` pulls in `cpal` (audio backend), `symphonia` (MP3 decoding), `lewton` (Vorbis), `claxon` (FLAC), `hound` (WAV).
+- **Existing infrastructure**: `RioEvent` system, config parsing, `EventProxy`, `EventListener` trait.
 - **Unchanged**: The existing `audio` feature and `cpal` dependency (Linux/BSD sine-wave bell) are not modified.
 - **No CR dependencies** — this is a standalone feature.
 
