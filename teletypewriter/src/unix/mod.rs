@@ -473,11 +473,51 @@ pub fn create_pty_with_spawn(
             let exec_cmd = if args.is_empty() {
                 format!("exec -a -{shell_name} {shell_program}")
             } else {
+                // Shell-quote each argument to prevent zsh from
+                // interpreting metacharacters (?, *, &, etc.)
+                // in URLs or other special strings.
+                let quoted_args: Vec<String> = args
+                    .iter()
+                    .map(|a| {
+                        if a.contains(|c: char| {
+                            matches!(
+                                c,
+                                ' ' | '?'
+                                    | '*'
+                                    | '&'
+                                    | '|'
+                                    | ';'
+                                    | '('
+                                    | ')'
+                                    | '\''
+                                    | '"'
+                                    | '\\'
+                                    | '`'
+                                    | '$'
+                                    | '!'
+                                    | '{'
+                                    | '}'
+                                    | '['
+                                    | ']'
+                                    | '<'
+                                    | '>'
+                                    | '#'
+                                    | '~'
+                            )
+                        }) {
+                            // Wrap in single quotes, escaping
+                            // embedded single quotes
+                            format!("'{}'", a.replace('\'', "'\\''"))
+                        } else {
+                            a.clone()
+                        }
+                    })
+                    .collect();
                 format!(
                     "exec -a -{} {} {}",
                     shell_name,
                     shell_program,
-                    args.join(" ")
+                    quoted_args.join(" ")
                 )
             };
 
