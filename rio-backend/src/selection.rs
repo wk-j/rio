@@ -75,7 +75,7 @@ impl SelectionRange {
         shape: CursorShape,
     ) -> bool {
         // Do not invert block cursor at selection boundaries.
-        if shape == CursorShape::Block
+        if matches!(shape, CursorShape::Block | CursorShape::Custom)
             && point == indexed.pos
             && (self.start == indexed.pos
                 || self.end == indexed.pos

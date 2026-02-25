@@ -576,4 +576,13 @@ impl Sugarloaf<'_> {
     pub fn set_cursor_glow_layers(&mut self, layers: Vec<Quad>) {
         self.state.set_cursor_glow_layers(layers);
     }
+
+    /// Set the custom cursor quad definitions for this frame.
+    #[inline]
+    pub fn set_custom_cursor_quads(
+        &mut self,
+        quads: Vec<crate::sugarloaf::primitives::CustomCursorQuad>,
+    ) {
+        self.rich_text_brush.set_custom_cursor_quads(quads);
+    }
 }

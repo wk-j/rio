@@ -23,6 +23,10 @@ pub enum CursorShape {
     /// Cursor is hidden.
     #[serde(alias = "hidden")]
     Hidden,
+    /// User-defined cursor composed of one or more quads.
+    /// The actual quad geometry is defined in `CursorConfig::quads`.
+    #[serde(alias = "custom")]
+    Custom,
 }
 
 impl CursorShape {
@@ -40,7 +44,7 @@ impl From<CursorShape> for char {
         match value {
             CursorShape::Underline => '_',
             CursorShape::Beam => '|',
-            _ => '▇',
+            CursorShape::Block | CursorShape::Hidden | CursorShape::Custom => '▇',
         }
     }
 }

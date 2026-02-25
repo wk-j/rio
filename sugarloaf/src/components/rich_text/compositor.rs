@@ -10,16 +10,28 @@ pub use crate::components::rich_text::batch::{Rect, Vertex};
 use crate::components::rich_text::image_cache::glyph::GlyphCacheSession;
 use crate::components::rich_text::text::*;
 use crate::layout::{FragmentStyleDecoration, UnderlineShape};
+use crate::sugarloaf::primitives::CustomCursorQuad;
 
 pub struct Compositor {
     pub batches: BatchManager,
+    /// Custom cursor quad definitions set once per frame by the
+    /// renderer. Used when `SugarCursor::Custom` is encountered.
+    custom_cursor_quads: Vec<CustomCursorQuad>,
 }
 
 impl Compositor {
     pub fn new() -> Self {
         Self {
             batches: BatchManager::new(),
+            custom_cursor_quads: Vec::new(),
         }
+    }
+
+    /// Set the custom cursor quad definitions for this frame.
+    /// Called by the renderer before text layout when the cursor
+    /// shape is `Custom`.
+    pub fn set_custom_cursor_quads(&mut self, quads: Vec<CustomCursorQuad>) {
+        self.custom_cursor_quads = quads;
     }
 
     /// Creates an underline decoration based on the style and rect
@@ -185,6 +197,15 @@ impl Compositor {
                             Rect::new(rect.x, style.baseline + 1.0, rect.width, 2.0);
                         self.batches.add_rect(&caret_rect, depth, &cursor_color);
                     }
+                    crate::SugarCursor::Custom(_) => {
+                        self.draw_custom_cursor(
+                            &rect,
+                            depth,
+                            cursor_top,
+                            font_height,
+                            style.background_color,
+                        );
+                    }
                 }
             }
 
@@ -283,6 +304,15 @@ impl Compositor {
                             Rect::new(rect.x, style.baseline + 1.0, rect.width, 2.0);
                         self.batches.add_rect(&caret_rect, depth, &cursor_color);
                     }
+                    crate::SugarCursor::Custom(_) => {
+                        self.draw_custom_cursor(
+                            &rect,
+                            depth,
+                            cursor_top,
+                            font_height,
+                            style.background_color,
+                        );
+                    }
                 }
             }
 
@@ -295,6 +325,42 @@ impl Compositor {
                     depth,
                     style.line_height,
                 );
+            }
+        }
+    }
+
+    /// Render custom cursor quads relative to the current cell.
+    fn draw_custom_cursor(
+        &mut self,
+        rect: &Rect,
+        depth: f32,
+        cursor_top: f32,
+        font_height: f32,
+        background_color: Option<[f32; 4]>,
+    ) {
+        for quad in &self.custom_cursor_quads.clone() {
+            let qx = rect.x + quad.rel_rect[0] * rect.width;
+            let qy = cursor_top + quad.rel_rect[1] * font_height;
+            let qw = quad.rel_rect[2] * rect.width;
+            let qh = quad.rel_rect[3] * font_height;
+
+            if quad.border_width > 0.0 {
+                // Outline: draw outer rect, then inner rect with bg
+                let outer = Rect::new(qx, qy, qw, qh);
+                self.batches.add_rect(&outer, depth, &quad.color);
+                if let Some(bg_color) = background_color {
+                    let bw = quad.border_width;
+                    let inner = Rect::new(
+                        qx + bw,
+                        qy + bw,
+                        (qw - bw * 2.0).max(0.0),
+                        (qh - bw * 2.0).max(0.0),
+                    );
+                    self.batches.add_rect(&inner, depth, &bg_color);
+                }
+            } else {
+                let cursor_rect = Rect::new(qx, qy, qw, qh);
+                self.batches.add_rect(&cursor_rect, depth, &quad.color);
             }
         }
     }

@@ -24,10 +24,12 @@ use rio_backend::config::colors::{
     AnsiColor, ColorArray, Colors, NamedColor,
 };
 use rio_backend::config::Config;
+use rio_backend::config::CursorQuadDef;
 use rio_backend::event::EventProxy;
 use rio_backend::sugarloaf::{
-    drawable_character, Content, FragmentStyle, FragmentStyleDecoration, Graphic, Quad,
-    Stretch, Style, SugarCursor, Sugarloaf, UnderlineInfo, UnderlineShape, Weight,
+    drawable_character, Content, CustomCursorQuad, FragmentStyle,
+    FragmentStyleDecoration, Graphic, Quad, Stretch, Style, SugarCursor, Sugarloaf,
+    UnderlineInfo, UnderlineShape, Weight,
 };
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::ops::RangeInclusive;
@@ -92,6 +94,8 @@ pub struct Renderer {
     char_cache: CharCache,
     // Cursor glow config
     glow_config: rio_backend::config::CursorGlowConfig,
+    // Custom cursor quad definitions (from config)
+    cursor_quads: Vec<CursorQuadDef>,
     /// Resolved glow color as [r, g, b] (alpha applied per-layer).
     /// When glow color is "cursor", this is updated each frame from
     /// the cursor color to track theme/ANSI overrides.
@@ -128,6 +132,36 @@ fn resolve_glow_color(
 }
 
 impl Renderer {
+    /// Build `CustomCursorQuad` objects from config-level
+    /// `CursorQuadDef` entries. Color resolution is deferred to
+    /// render time (cursor_color), but per-quad overrides with
+    /// explicit hex colors are resolved here.
+    fn build_custom_cursor_quads(&self) -> Vec<CustomCursorQuad> {
+        let fallback = self.named_colors.cursor;
+        self.cursor_quads
+            .iter()
+            .map(|def| {
+                let base_color = def
+                    .color
+                    .as_ref()
+                    .map(|hex| rio_backend::config::colors::hex_to_color_arr(hex))
+                    .unwrap_or(fallback);
+                let color = [
+                    base_color[0],
+                    base_color[1],
+                    base_color[2],
+                    base_color[3] * def.opacity,
+                ];
+                CustomCursorQuad {
+                    rel_rect: [def.x, def.y, def.width, def.height],
+                    color,
+                    border_radius: def.border_radius,
+                    border_width: def.border_width,
+                }
+            })
+            .collect()
+    }
+
     pub fn new(
         config: &Config,
         font_context: &rio_backend::sugarloaf::font::FontLibrary,
@@ -185,6 +219,7 @@ impl Renderer {
             char_cache: CharCache::new(),
             is_game_mode_enabled: config.renderer.strategy.is_game(),
             glow_config: config.cursor.glow.clone(),
+            cursor_quads: config.cursor.quads.clone(),
             glow_resolved_color: resolve_glow_color(&config.cursor.glow, &config.colors),
             trail_last_pos: None,
             trail_entries: VecDeque::new(),
@@ -733,8 +768,11 @@ impl Renderer {
             && background_color[0] == self.dynamic_background.0[0]
             && background_color[1] == self.dynamic_background.0[1]
             && background_color[2] == self.dynamic_background.0[2];
-        let background_color = if has_dynamic_background
-            && (cursor.state.content != CursorShape::Block && is_active)
+        let is_block_like = matches!(
+            cursor.state.content,
+            CursorShape::Block | CursorShape::Custom
+        );
+        let background_color = if has_dynamic_background && (!is_block_like && is_active)
         {
             None
         } else {
@@ -743,10 +781,7 @@ impl Renderer {
 
         // If IME is or cursor is block enabled, put background color
         // when cursor is over the character
-        match (
-            cursor.is_ime_enabled,
-            (cursor.state.content == CursorShape::Block || !is_active),
-        ) {
+        match (cursor.is_ime_enabled, (is_block_like || !is_active)) {
             (_, true) => {
                 color = self.named_colors.background.0;
             }
@@ -789,6 +824,14 @@ impl Renderer {
                 style.cursor = Some(SugarCursor::Caret(cursor_color));
             }
             CursorShape::Hidden => {}
+            CursorShape::Custom => {
+                if self.cursor_quads.is_empty() {
+                    // Fallback to block if no quads defined
+                    style.cursor = Some(SugarCursor::Block(cursor_color));
+                } else {
+                    style.cursor = Some(SugarCursor::Custom(cursor_color));
+                }
+            }
         }
 
         if !is_active {
@@ -967,6 +1010,14 @@ impl Renderer {
         focused_match: &Option<RangeInclusive<Pos>>,
     ) -> Option<crate::context::renderable::WindowUpdate> {
         // let start = std::time::Instant::now();
+
+        // Set custom cursor quad definitions for this frame
+        if !self.cursor_quads.is_empty() {
+            let quads = self.build_custom_cursor_quads();
+            sugarloaf.set_custom_cursor_quads(quads);
+        } else {
+            sugarloaf.set_custom_cursor_quads(Vec::new());
+        }
 
         // In case rich text for search was not created
         let has_search = self.search.active_search.is_some();
@@ -1500,7 +1551,7 @@ impl Renderer {
 
                     // Shape-aware base size: adapt to cursor shape
                     let (base_w, base_h) = match cursor_shape {
-                        CursorShape::Block => (cell_w, cell_h),
+                        CursorShape::Block | CursorShape::Custom => (cell_w, cell_h),
                         CursorShape::Beam => (2.0, cell_h),
                         CursorShape::Underline => (cell_w, 2.0),
                         CursorShape::Hidden => (cell_w, cell_h),
@@ -1571,7 +1622,7 @@ impl Renderer {
 
                         // Shape-aware size for the trail ghost
                         let (tw, th) = match entry.cursor_shape {
-                            CursorShape::Block => {
+                            CursorShape::Block | CursorShape::Custom => {
                                 (entry.cell_size[0], entry.cell_size[1])
                             }
                             CursorShape::Beam => (2.0, entry.cell_size[1]),
@@ -1596,7 +1647,10 @@ impl Renderer {
 
                         let br = match entry.cursor_shape {
                             CursorShape::Underline => gh / 2.0,
-                            _ => gw.min(gh) / 2.0,
+                            CursorShape::Block
+                            | CursorShape::Beam
+                            | CursorShape::Hidden
+                            | CursorShape::Custom => gw.min(gh) / 2.0,
                         };
 
                         quads.push(Quad {
@@ -1626,7 +1680,10 @@ impl Renderer {
                         // block/beam, flatter for underline
                         let br = match cursor_shape {
                             CursorShape::Underline => glow_h / 2.0,
-                            _ => glow_w.min(glow_h) / 2.0,
+                            CursorShape::Block
+                            | CursorShape::Beam
+                            | CursorShape::Hidden
+                            | CursorShape::Custom => glow_w.min(glow_h) / 2.0,
                         };
 
                         quads.push(Quad {

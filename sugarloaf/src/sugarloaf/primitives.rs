@@ -6,12 +6,31 @@
 use crate::Quad;
 use serde::Deserialize;
 
+/// Describes a single quad in a custom cursor definition.
+///
+/// Position and size are relative to the cursor cell (0.0–2.0).
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct CustomCursorQuad {
+    /// Cell-relative rect: `[x, y, width, height]`.
+    pub rel_rect: [f32; 4],
+    /// RGBA color for this quad.
+    pub color: [f32; 4],
+    /// Corner radius in pixels (0 = sharp corners).
+    pub border_radius: f32,
+    /// Border width in pixels (0 = filled).
+    pub border_width: f32,
+}
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum SugarCursor {
     Block([f32; 4]),
     HollowBlock([f32; 4]),
     Caret([f32; 4]),
     Underline([f32; 4]),
+    /// Custom cursor — carries the base cursor color.
+    /// The actual quad geometry is stored on the compositor
+    /// via `set_custom_cursor_quads()`.
+    Custom([f32; 4]),
 }
 
 #[derive(Default, Clone, Deserialize, Debug, PartialEq)]

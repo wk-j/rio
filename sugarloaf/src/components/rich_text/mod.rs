@@ -770,6 +770,15 @@ impl RichTextBrush {
         self.text_run_manager.clear_all();
     }
 
+    /// Set the custom cursor quad definitions for this frame.
+    #[inline]
+    pub fn set_custom_cursor_quads(
+        &mut self,
+        quads: Vec<crate::sugarloaf::primitives::CustomCursorQuad>,
+    ) {
+        self.comp.set_custom_cursor_quads(quads);
+    }
+
     #[inline]
     pub fn clear_atlas(&mut self) {
         self.images.clear_atlas();

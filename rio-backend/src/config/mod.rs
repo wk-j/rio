@@ -181,6 +181,82 @@ pub struct CursorConfig {
     pub blinking_interval: u64,
     #[serde(default)]
     pub glow: CursorGlowConfig,
+    /// Custom quad definitions. Only used when shape = 'custom'.
+    #[serde(default)]
+    pub quads: Vec<CursorQuadDef>,
+}
+
+/// Defines a single quad in a custom cursor shape.
+///
+/// All position and size values are relative to the cursor cell:
+/// - `x`, `y`: offset within the cell (0.0 = left/top edge)
+/// - `width`, `height`: fraction of cell dimensions
+///
+/// ```toml
+/// [[cursor.quads]]
+/// x = 0.0
+/// y = 0.85
+/// width = 1.0
+/// height = 0.15
+/// border-radius = 2
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CursorQuadDef {
+    /// Horizontal offset within cell (0.0 = left edge).
+    #[serde(default)]
+    pub x: f32,
+    /// Vertical offset within cell (0.0 = top edge).
+    #[serde(default)]
+    pub y: f32,
+    /// Width as fraction of cell width.
+    #[serde(default = "default_quad_full")]
+    pub width: f32,
+    /// Height as fraction of cell height.
+    #[serde(default = "default_quad_full")]
+    pub height: f32,
+    /// Corner radius in pixels (0 = sharp corners).
+    #[serde(default, rename = "border-radius")]
+    pub border_radius: f32,
+    /// Border width in pixels (0 = filled, >0 = outline only).
+    #[serde(default, rename = "border-width")]
+    pub border_width: f32,
+    /// Opacity override (0.0–1.0). Default 1.0.
+    #[serde(default = "default_quad_full")]
+    pub opacity: f32,
+    /// Optional color override (hex string). If absent, uses
+    /// cursor color.
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+#[inline]
+fn default_quad_full() -> f32 {
+    1.0
+}
+
+impl CursorConfig {
+    /// Validate and clamp custom cursor quad definitions.
+    /// Falls back to block if shape is custom but no quads are
+    /// defined.
+    pub fn validate(&mut self) {
+        if self.shape == CursorShape::Custom && self.quads.is_empty() {
+            warn!(
+                "cursor shape is 'custom' but no [[cursor.quads]] \
+                 defined, falling back to 'block'"
+            );
+            self.shape = CursorShape::Block;
+        }
+
+        for quad in &mut self.quads {
+            quad.x = quad.x.clamp(0.0, 2.0);
+            quad.y = quad.y.clamp(0.0, 2.0);
+            quad.width = quad.width.clamp(0.01, 2.0);
+            quad.height = quad.height.clamp(0.01, 2.0);
+            quad.opacity = quad.opacity.clamp(0.0, 1.0);
+            quad.border_radius = quad.border_radius.max(0.0);
+            quad.border_width = quad.border_width.max(0.0);
+        }
+    }
 }
 
 /// Configuration for the cursor glow effect — a soft halo rendered
@@ -473,6 +549,8 @@ impl Config {
             let content = std::fs::read_to_string(path).unwrap();
             match toml::from_str::<Config>(&content) {
                 Ok(mut decoded) => {
+                    decoded.cursor.validate();
+
                     let theme = &decoded.theme;
                     if theme.is_empty() {
                         return decoded;
@@ -506,6 +584,8 @@ impl Config {
             match std::fs::read_to_string(path) {
                 Ok(content) => match toml::from_str::<Config>(&content) {
                     Ok(mut decoded) => {
+                        decoded.cursor.validate();
+
                         let theme = &decoded.theme;
                         let theme_path = config_dir_path().join("themes");
                         if !theme.is_empty() {
@@ -763,6 +843,7 @@ impl Default for CursorConfig {
             blinking: false,
             blinking_interval: default_cursor_interval(),
             glow: CursorGlowConfig::default(),
+            quads: Vec::new(),
         }
     }
 }
@@ -1638,5 +1719,125 @@ mod tests {
         // Before applying platform overrides, should only have global env vars
         assert_eq!(result.env_vars.len(), 1);
         assert!(result.env_vars.contains(&String::from("GLOBAL=1")));
+    }
+
+    #[test]
+    fn test_custom_cursor_config_parsing() {
+        let result = create_temporary_config(
+            "custom-cursor",
+            r#"
+            [cursor]
+            shape = 'custom'
+
+            [[cursor.quads]]
+            x = 0.0
+            y = 0.8
+            width = 1.0
+            height = 0.2
+            border-radius = 2.0
+        "#,
+        );
+
+        assert_eq!(result.cursor.shape, CursorShape::Custom);
+        assert_eq!(result.cursor.quads.len(), 1);
+        assert_eq!(result.cursor.quads[0].x, 0.0);
+        assert_eq!(result.cursor.quads[0].y, 0.8);
+        assert_eq!(result.cursor.quads[0].width, 1.0);
+        assert_eq!(result.cursor.quads[0].height, 0.2);
+        assert_eq!(result.cursor.quads[0].border_radius, 2.0);
+    }
+
+    #[test]
+    fn test_custom_cursor_multi_quad() {
+        let result = create_temporary_config(
+            "custom-cursor-multi",
+            r#"
+            [cursor]
+            shape = 'custom'
+
+            [[cursor.quads]]
+            x = 0.0
+            y = 0.0
+            width = 0.15
+            height = 1.0
+
+            [[cursor.quads]]
+            x = 0.0
+            y = 0.85
+            width = 1.0
+            height = 0.15
+            color = '#FF5555'
+        "#,
+        );
+
+        assert_eq!(result.cursor.shape, CursorShape::Custom);
+        assert_eq!(result.cursor.quads.len(), 2);
+        // First quad: vertical bar
+        assert_eq!(result.cursor.quads[0].width, 0.15);
+        assert_eq!(result.cursor.quads[0].height, 1.0);
+        assert!(result.cursor.quads[0].color.is_none());
+        // Second quad: horizontal bar with color
+        assert_eq!(result.cursor.quads[1].y, 0.85);
+        assert_eq!(result.cursor.quads[1].color, Some(String::from("#FF5555")));
+    }
+
+    #[test]
+    fn test_custom_cursor_fallback_when_no_quads() {
+        let mut config = CursorConfig {
+            shape: CursorShape::Custom,
+            quads: Vec::new(),
+            ..CursorConfig::default()
+        };
+        config.validate();
+        // Should fall back to Block
+        assert_eq!(config.shape, CursorShape::Block);
+    }
+
+    #[test]
+    fn test_custom_cursor_quad_clamping() {
+        let mut config = CursorConfig {
+            shape: CursorShape::Custom,
+            quads: vec![CursorQuadDef {
+                x: -1.0,
+                y: 5.0,
+                width: 0.0,
+                height: 10.0,
+                opacity: 2.0,
+                border_radius: -3.0,
+                border_width: -1.0,
+                color: None,
+            }],
+            ..CursorConfig::default()
+        };
+        config.validate();
+        assert_eq!(config.quads[0].x, 0.0);
+        assert_eq!(config.quads[0].y, 2.0);
+        assert_eq!(config.quads[0].width, 0.01);
+        assert_eq!(config.quads[0].height, 2.0);
+        assert_eq!(config.quads[0].opacity, 1.0);
+        assert_eq!(config.quads[0].border_radius, 0.0);
+        assert_eq!(config.quads[0].border_width, 0.0);
+    }
+
+    #[test]
+    fn test_shell_config_used_by_overlay_and_editor() {
+        let result = create_temporary_config(
+            "shell-for-overlay",
+            r#"
+            [shell]
+            program = "/opt/homebrew/bin/fish"
+            args = ["--login"]
+
+            [editor]
+            program = "hx"
+            args = []
+        "#,
+        );
+
+        // The configured shell is available for wrapping overlay
+        // and editor commands.
+        assert_eq!(result.shell.program, "/opt/homebrew/bin/fish");
+        assert_eq!(result.shell.args, vec!["--login"]);
+        assert_eq!(result.editor.program, "hx");
     }
 }

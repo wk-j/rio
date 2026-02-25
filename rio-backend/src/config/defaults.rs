@@ -227,11 +227,28 @@ pub fn default_config_file_content() -> String {
 # Cursor
 #
 # shape - Default cursor shape is 'block'
-# Other available options are: 'underline', 'beam' or 'hidden'
+# Other available options are: 'underline', 'beam', 'hidden' or 'custom'
 #
 # blinking - Whether the cursor blinks. The default is false
 #
 # blinking-interval - Cursor update on milliseconds interval
+#
+# When shape = 'custom', define one or more [[cursor.quads]] to
+# build your own cursor from cell-relative quads:
+#
+# [cursor]
+# shape = 'custom'
+# blinking = true
+#
+# [[cursor.quads]]
+# x = 0.0
+# y = 0.85
+# width = 1.0
+# height = 0.15
+# border-radius = 2
+# border-width = 0
+# opacity = 1.0
+# # color = '#FF5555'   # optional, defaults to cursor color
 #
 # [cursor]
 # shape = 'block'
