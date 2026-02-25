@@ -347,6 +347,30 @@ impl Router<'_> {
             .copied()
     }
 
+    /// Resolve the shell program to use for wrapping editor/overlay
+    /// commands. Uses the configured `[shell].program`, falling back
+    /// to the `$SHELL` environment variable.
+    fn resolve_shell_program(config: &RioConfig) -> String {
+        if config.shell.program.is_empty() {
+            std::env::var("SHELL").unwrap_or_default()
+        } else {
+            config.shell.program.clone()
+        }
+    }
+
+    /// Build the full editor command string from `[editor]` config,
+    /// appending the config file path as the last argument.
+    fn build_editor_command(config: &RioConfig) -> String {
+        let mut parts = vec![config.editor.program.clone()];
+        parts.extend(config.editor.args.clone());
+        parts.push(
+            rio_backend::config::config_file_path()
+                .display()
+                .to_string(),
+        );
+        parts.join(" ")
+    }
+
     pub fn open_config_window(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -362,20 +386,19 @@ impl Router<'_> {
         }
 
         let current_config: RioConfig = config.clone();
-        let editor = config.editor.clone();
-        let mut args = editor.args;
-        args.push(
-            rio_backend::config::config_file_path()
-                .display()
-                .to_string(),
-        );
+
+        // Build the full editor command string, then wrap it
+        // through the user's configured shell so the shell's
+        // login environment (including PATH) is available.
+        let editor_cmd = Self::build_editor_command(config);
+        let shell_program = Self::resolve_shell_program(config);
         let new_config = RioConfig {
             shell: rio_backend::config::Shell {
-                program: editor.program,
-                args,
+                program: shell_program,
+                args: vec![String::from("-c"), editor_cmd],
             },
-            // Must use spawn (not fork) so the editor program override
-            // actually takes effect instead of forking the login shell.
+            // Must use spawn (not fork) so the shell override
+            // actually takes effect.
             #[cfg(not(target_os = "windows"))]
             use_fork: false,
             ..current_config
@@ -400,20 +423,13 @@ impl Router<'_> {
 
     pub fn open_config_split(&mut self, config: &RioConfig) {
         let current_config: RioConfig = config.clone();
-        let editor = config.editor.clone();
-        let mut args = editor.args;
-        args.push(
-            rio_backend::config::config_file_path()
-                .display()
-                .to_string(),
-        );
+        let editor_cmd = Self::build_editor_command(config);
+        let shell_program = Self::resolve_shell_program(config);
         let new_config = RioConfig {
             shell: rio_backend::config::Shell {
-                program: editor.program,
-                args,
+                program: shell_program,
+                args: vec![String::from("-c"), editor_cmd],
             },
-            // Must use spawn (not fork) so the editor program override
-            // actually takes effect instead of forking the login shell.
             #[cfg(not(target_os = "windows"))]
             use_fork: false,
             ..current_config

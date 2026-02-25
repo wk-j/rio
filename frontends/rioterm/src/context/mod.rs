@@ -1160,21 +1160,37 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
             }
         }
 
-        // Override shell config to run the specific command
+        // Override shell config to run the specific command.
+        // Wrap through the user's configured shell so that the
+        // shell's login environment (including PATH) is available.
         let mut cloned_config = self.config.clone();
         if working_dir.is_some() {
             cloned_config.working_dir = working_dir;
         }
-        // Parse command string: first token is program, rest are args
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        if parts.is_empty() {
-            tracing::error!("empty command for command overlay");
-            return;
-        }
-        cloned_config.shell = rio_backend::config::Shell {
-            program: parts[0].to_string(),
-            args: parts[1..].iter().map(|s| s.to_string()).collect(),
+
+        let shell_program = if self.config.shell.program.is_empty() {
+            std::env::var("SHELL").unwrap_or_default()
+        } else {
+            self.config.shell.program.clone()
         };
+
+        if !shell_program.is_empty() {
+            cloned_config.shell = rio_backend::config::Shell {
+                program: shell_program,
+                args: vec![String::from("-c"), command.to_string()],
+            };
+        } else {
+            // No shell available — fall back to direct execution.
+            let parts: Vec<&str> = command.split_whitespace().collect();
+            if parts.is_empty() {
+                tracing::error!("empty command for command overlay");
+                return;
+            }
+            cloned_config.shell = rio_backend::config::Shell {
+                program: parts[0].to_string(),
+                args: parts[1..].iter().map(|s| s.to_string()).collect(),
+            };
+        }
         // Must use spawn (not fork) so the shell override actually takes effect
         #[cfg(not(target_os = "windows"))]
         {
