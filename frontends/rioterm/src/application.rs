@@ -283,6 +283,7 @@ impl Application<'_> {
                     &screen,
                     self.config.window.align_gap,
                     self.config.window.align_width,
+                    self.config.window.align_height,
                 );
             }
         }
@@ -377,6 +378,7 @@ impl Application<'_> {
             &screen,
             self.config.window.align_gap,
             self.config.window.align_width,
+            self.config.window.align_height,
             reverse,
         );
     }

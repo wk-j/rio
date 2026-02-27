@@ -127,6 +127,8 @@ pub struct Window {
     pub align_gap: u32,
     #[serde(default = "default_align_width", rename = "align-width")]
     pub align_width: f32,
+    #[serde(default = "default_align_height", rename = "align-height")]
+    pub align_height: f32,
     #[serde(default = "AlignMode::default", rename = "align-mode")]
     pub align_mode: AlignMode,
     /// When true, window focus changes only via keyboard shortcuts (CycleWindowNext/Prev),
@@ -144,6 +146,10 @@ fn default_align_gap() -> u32 {
 }
 
 fn default_align_width() -> f32 {
+    1.0
+}
+
+fn default_align_height() -> f32 {
     1.0
 }
 
@@ -168,6 +174,7 @@ impl Default for Window {
             peek_width: default_peek_width(),
             align_gap: default_align_gap(),
             align_width: default_align_width(),
+            align_height: default_align_height(),
             align_mode: AlignMode::default(),
             keyboard_only_focus: false,
         }

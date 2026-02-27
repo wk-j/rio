@@ -79,10 +79,12 @@ pub fn get_available_screen_area(
     }
 }
 
-/// Position for the focused window.
+/// Position for the focused window (side layout).
 ///
 /// - With 1 window: no alignment (handled by caller returning early).
 /// - With 2+ windows: left-aligned at `align_width` ratio.
+///
+/// Height always fills the available screen area (full height).
 pub fn focused_slot(
     screen: &ScreenArea,
     gap: u32,
@@ -242,6 +244,7 @@ pub fn apply_stack_layout(
     screen: &ScreenArea,
     gap: u32,
     align_width: f32,
+    align_height: f32,
 ) {
     let len = window_order.len();
     if len < 2 {
@@ -262,9 +265,13 @@ pub fn apply_stack_layout(
     // Compute focused window slot (centered)
     let ratio = align_width.clamp(0.1, 1.0);
     let w = (screen.width.saturating_sub(gap * 2) as f32 * ratio) as u32;
-    let h = screen.height.saturating_sub(gap * 2 + decoration_height);
+    let full_h = screen.height.saturating_sub(gap * 2 + decoration_height);
+    let h_ratio = align_height.clamp(0.1, 1.0);
+    let h = (full_h as f32 * h_ratio) as u32;
     let base_x = screen.x + ((screen.width.saturating_sub(w)) / 2) as i32;
     let base_y = screen.y + gap as i32;
+    // Vertically center the focused window within the available area
+    let focused_y = base_y + ((full_h.saturating_sub(h)) / 2) as i32;
 
     // Collect unfocused windows in ring order
     let focused_idx = window_order
@@ -293,17 +300,17 @@ pub fn apply_stack_layout(
             x,
             y: base_y,
             width: back_w,
-            height: h,
+            height: full_h,
         };
         if let Some(route) = routes.get_mut(id) {
             apply_slot(route, &slot);
         }
     }
 
-    // Position and raise focused window (last = topmost)
+    // Position and raise focused window (last = topmost, vertically centered)
     let focused_slot = WindowSlot {
         x: base_x,
-        y: base_y,
+        y: focused_y,
         width: w,
         height: h,
     };
@@ -325,6 +332,7 @@ pub fn cycle_focus_stack(
     screen: &ScreenArea,
     gap: u32,
     align_width: f32,
+    align_height: f32,
     reverse: bool,
 ) -> Option<WindowId> {
     if window_order.len() < 2 {
@@ -348,7 +356,15 @@ pub fn cycle_focus_stack(
 
     let new_focused = window_order[next_idx];
 
-    apply_stack_layout(routes, new_focused, window_order, screen, gap, align_width);
+    apply_stack_layout(
+        routes,
+        new_focused,
+        window_order,
+        screen,
+        gap,
+        align_width,
+        align_height,
+    );
 
     Some(new_focused)
 }

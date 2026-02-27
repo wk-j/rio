@@ -6,7 +6,7 @@
 
 ## Summary
 
-A second window alignment mode for Rio terminal: **Focus Front / Stack Back**. The focused window is brought to the **frontmost layer at full (or near-full) screen size**, while all unfocused windows are **arranged left-to-right behind it, equally filling the entire desktop space**. Cycling focus promotes a different window to the front and rearranges the others behind it. This gives a "stage manager" experience — one window dominates the screen, others are tiled behind it for quick switching.
+A second window alignment mode for Rio terminal: **Focus Front / Stack Back**. The focused window is brought to the **frontmost layer at full (or near-full) screen size**, while all unfocused windows are **arranged left-to-right behind it, equally filling the entire desktop space**. Cycling focus promotes a different window to the front and rearranges the others behind it. This gives a "stage manager" experience — one window dominates the screen, others are tiled behind it for quick switching. In stack mode, the focused window height is independently configurable via `align-height`.
 
 ## Motivation
 
@@ -62,13 +62,13 @@ The unfocused windows fill the full screen space from left to right, split equal
 | Window Count | Focused Window | Unfocused Windows |
 |---|---|---|
 | 1 | No alignment (stays at user's position/size) | none |
-| 2 | Front, centered, `align-width` ratio of screen | 1 behind, full screen size |
-| 3 | Front, centered, `align-width` ratio of screen | 2 behind, each 50% screen width, left-to-right |
-| N | Front, centered, `align-width` ratio of screen | N-1 behind, each `1/(N-1)` screen width, left-to-right |
+| 2 | Front, centered, `align-width` × `align-height` ratio | 1 behind, full screen size |
+| 3 | Front, centered, `align-width` × `align-height` ratio | 2 behind, each 50% screen width, left-to-right |
+| N | Front, centered, `align-width` × `align-height` ratio | N-1 behind, each `1/(N-1)` screen width, left-to-right |
 
 Positioning details:
 - **Single window:** no automatic alignment — window stays at user-defined position and size
-- **Focused (2+ windows):** centered on screen at `align-width` ratio, brought to front (topmost z-order)
+- **Focused (2+ windows):** centered on screen at `align-width` ratio. In stack mode, height is controlled by `align-height` ratio. Brought to front (topmost z-order)
 - **Back row:** unfocused windows are arranged left-to-right, each getting `screen_width / (N-1)` width and full screen height (minus gap and decoration). They are positioned behind the focused window in z-order.
 - **Z-order:** the focused window is always topmost; back-row windows are positioned first so the OS stacks them behind the focused window
 - **Resize on switch:** when focus changes, **all windows resize** — the new focus expands to fill the front slot, the previous focus shrinks to fill its share of the back row
@@ -161,11 +161,26 @@ impl Default for AlignMode {
 }
 ```
 
-New field on the `Window` struct:
+New fields on the `Window` struct:
 
 ```rust
 #[serde(default = "AlignMode::default", rename = "align-mode")]
 pub align_mode: AlignMode,
+
+/// Focused window height as a ratio of available screen height
+/// (0.1–1.0). Only affects the focused window in stack layout.
+/// Side layout and unfocused windows always use full screen height.
+/// Default: 1.0 (full height).
+#[serde(default = "default_align_height", rename = "align-height")]
+pub align_height: f32,
+```
+
+With default:
+
+```rust
+fn default_align_height() -> f32 {
+    1.0
+}
 ```
 
 Full TOML example:
@@ -174,7 +189,8 @@ Full TOML example:
 [window]
 auto-align = true
 align-mode = "stack"       # "side" (CR-001 default) or "stack" (this CR)
-align-width = 0.9          # focused window width as ratio of screen
+align-width = 0.9          # focused window width as ratio of screen (0.1–1.0)
+align-height = 0.9         # focused window height in stack mode (0.1–1.0, stack layout only)
 align-gap = 20             # pixels of margin around the focused window
 keyboard-only-focus = true
 ```
@@ -187,9 +203,10 @@ Add a new `apply_stack_layout()` function alongside the existing `apply_layout()
 /// Apply focus-front / back-row layout.
 ///
 /// The focused window is centered on screen at `align_width` ratio
-/// and brought to the front. Unfocused windows are arranged
-/// left-to-right behind it, equally filling the full desktop width
-/// and height. All windows resize when focus switches.
+/// (width) and `align_height` ratio (height), brought to the front.
+/// Unfocused windows are arranged left-to-right behind it, equally
+/// filling the full desktop width and height. All windows resize
+/// when focus switches.
 pub fn apply_stack_layout(
     routes: &mut FxHashMap<WindowId, Route>,
     focused_id: WindowId,
@@ -197,6 +214,7 @@ pub fn apply_stack_layout(
     screen: &ScreenArea,
     gap: u32,
     align_width: f32,
+    align_height: f32,
 ) {
     let len = window_order.len();
     if len < 2 {
@@ -219,9 +237,11 @@ pub fn apply_stack_layout(
     let ratio = align_width.clamp(0.1, 1.0);
     let w = (screen.width.saturating_sub(gap * 2) as f32 * ratio)
         as u32;
-    let h = screen
+    let full_h = screen
         .height
         .saturating_sub(gap * 2 + decoration_height);
+    let h_ratio = align_height.clamp(0.1, 1.0);
+    let h = (full_h as f32 * h_ratio) as u32;
     let base_x = screen.x
         + ((screen.width.saturating_sub(w)) / 2) as i32;
     let base_y = screen.y + gap as i32;
@@ -287,6 +307,7 @@ pub fn cycle_focus_stack(
     screen: &ScreenArea,
     gap: u32,
     align_width: f32,
+    align_height: f32,
     reverse: bool,
 ) -> Option<WindowId> {
     if window_order.len() < 2 {
@@ -317,6 +338,7 @@ pub fn cycle_focus_stack(
         screen,
         gap,
         align_width,
+        align_height,
     );
 
     Some(new_focused)
@@ -480,13 +502,13 @@ The existing `cycle_window_focus()` for CR-001 side-layout events remains unchan
 
 **Window ordering guarantee:** On macOS, calling `set_outer_position()` on a window may bring it forward. To ensure correct z-order, back-row windows are positioned in reverse order, and the focused window is positioned and focused last. If this proves insufficient, we may need to use `NSWindow::orderWindow:relativeTo:` via raw platform access.
 
-**Resize on focus switch:** All windows resize when focus changes. The newly focused window expands to `align-width` ratio, the previously focused window shrinks to fit its equal share of the back row. This ensures every window always fits its assigned position.
+**Resize on focus switch:** All windows resize when focus changes. The newly focused window expands to `align-width` ratio (and `align-height` ratio in stack mode), the previously focused window shrinks to fit its equal share of the back row. This ensures every window always fits its assigned position.
 
 **Same `core-graphics` dependency** as CR-001 for macOS screen detection.
 
 ## Visual Examples
 
-### 3 windows, Window A focused (align-width: 0.9, gap: 20):
+### 3 windows, Window A focused (align-width: 0.9, align-height: 1.0, gap: 20):
 
 ```
   +----------------------------------------------------+
@@ -568,10 +590,10 @@ Window A shrinks from focused size to back-row size. Window B expands to focused
 
 | File | Change |
 |---|---|
-| `rio-backend/src/config/window.rs` | Add `AlignMode` enum, `align_mode` field, defaults. Remove `stack_offset` field |
+| `rio-backend/src/config/window.rs` | Add `AlignMode` enum, `align_mode` field, `align_height` field, defaults. Remove `stack_offset` field |
 | `rio-backend/src/event/mod.rs` | Add `CycleStackWindowNext`, `CycleStackWindowPrev` variants to `RioEvent` |
 | `frontends/rioterm/src/bindings/mod.rs` | Add `CycleStackWindowNext`, `CycleStackWindowPrev` to `Action` enum, string parsing, and default keybindings (`Ctrl+Shift+.` / `Ctrl+Shift+,`) |
-| `frontends/rioterm/src/router/alignment.rs` | Add `apply_stack_layout()` (back-row left-to-right), `cycle_focus_stack()` |
+| `frontends/rioterm/src/router/alignment.rs` | Add `apply_stack_layout()` (back-row left-to-right), `cycle_focus_stack()`. Add `align_height` parameter to `apply_stack_layout()` and `cycle_focus_stack()` (stack layout only — side layout uses full height) |
 | `frontends/rioterm/src/context/mod.rs` | Add `cycle_stack_window_next()`, `cycle_stack_window_prev()` methods |
 | `frontends/rioterm/src/screen/mod.rs` | Add dispatch for `Act::CycleStackWindowNext`, `Act::CycleStackWindowPrev` |
 | `frontends/rioterm/src/application.rs` | Add `cycle_stack_window_focus()`, handle new events, modify `align_windows_with()` to match on `align_mode`. Remove `stack_offset` usage |
