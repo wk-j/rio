@@ -187,6 +187,12 @@ pub enum RioEvent {
     /// Cycle focus to the previous window.
     CycleWindowPrev,
 
+    /// Cycle focus to the next window using stack (front/back) layout.
+    CycleStackWindowNext,
+
+    /// Cycle focus to the previous window using stack (front/back) layout.
+    CycleStackWindowPrev,
+
     /// Update progress bar with command exit code (0 = success, non-zero = error).
     UpdateProgressBar(i32),
 
@@ -257,6 +263,12 @@ impl Debug for RioEvent {
             RioEvent::AlignWindows => write!(f, "AlignWindows"),
             RioEvent::CycleWindowNext => write!(f, "CycleWindowNext"),
             RioEvent::CycleWindowPrev => write!(f, "CycleWindowPrev"),
+            RioEvent::CycleStackWindowNext => {
+                write!(f, "CycleStackWindowNext")
+            }
+            RioEvent::CycleStackWindowPrev => {
+                write!(f, "CycleStackWindowPrev")
+            }
             RioEvent::PlaySound(event) => {
                 write!(f, "PlaySound({event:?})")
             }

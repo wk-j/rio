@@ -222,6 +222,137 @@ pub fn apply_layout(
     }
 }
 
+/// Apply focus-front / back-row layout.
+///
+/// The focused window is centered on screen at `align_width` ratio
+/// and brought to the front. Unfocused windows are arranged
+/// left-to-right behind it, equally filling the full desktop
+/// width and height. All windows resize when focus switches.
+///
+/// Example with [A, B, C], focus A:
+///   front: A (large, centered)
+///   back row: [B (left half), C (right half)]
+/// Cycle next, focus B:
+///   front: B (large, centered)
+///   back row: [C (left half), A (right half)]
+pub fn apply_stack_layout(
+    routes: &mut FxHashMap<WindowId, Route>,
+    focused_id: WindowId,
+    window_order: &[WindowId],
+    screen: &ScreenArea,
+    gap: u32,
+    align_width: f32,
+) {
+    let len = window_order.len();
+    if len < 2 {
+        return;
+    }
+
+    let decoration_height = routes
+        .values()
+        .next()
+        .map(|route| {
+            let outer = route.window.winit_window.outer_size();
+            let inner = route.window.winit_window.inner_size();
+            let scale = route.window.winit_window.scale_factor();
+            ((outer.height.saturating_sub(inner.height)) as f64 / scale) as u32
+        })
+        .unwrap_or(0);
+
+    // Compute focused window slot (centered)
+    let ratio = align_width.clamp(0.1, 1.0);
+    let w = (screen.width.saturating_sub(gap * 2) as f32 * ratio) as u32;
+    let h = screen.height.saturating_sub(gap * 2 + decoration_height);
+    let base_x = screen.x + ((screen.width.saturating_sub(w)) / 2) as i32;
+    let base_y = screen.y + gap as i32;
+
+    // Collect unfocused windows in ring order
+    let focused_idx = window_order
+        .iter()
+        .position(|id| *id == focused_id)
+        .unwrap_or(0);
+
+    let mut back_windows: Vec<WindowId> = Vec::with_capacity(len - 1);
+    for step in 1..len {
+        let idx = (focused_idx + step) % len;
+        back_windows.push(window_order[idx]);
+    }
+
+    // Back-row: arrange unfocused windows left-to-right,
+    // each getting an equal share of the full screen width.
+    // Positioned in reverse order (rightmost first) so that
+    // the focused window (positioned last) ends up on top.
+    let back_count = back_windows.len() as u32;
+    let total_back_gaps = back_count.saturating_sub(1) * gap;
+    let available_back_width = screen.width.saturating_sub(gap * 2 + total_back_gaps);
+    let back_w = available_back_width / back_count;
+
+    for (i, id) in back_windows.iter().enumerate().rev() {
+        let x = screen.x + gap as i32 + (i as u32 * (back_w + gap)) as i32;
+        let slot = WindowSlot {
+            x,
+            y: base_y,
+            width: back_w,
+            height: h,
+        };
+        if let Some(route) = routes.get_mut(id) {
+            apply_slot(route, &slot);
+        }
+    }
+
+    // Position and raise focused window (last = topmost)
+    let focused_slot = WindowSlot {
+        x: base_x,
+        y: base_y,
+        width: w,
+        height: h,
+    };
+    if let Some(route) = routes.get_mut(&focused_id) {
+        apply_slot(route, &focused_slot);
+        route.window.winit_window.focus_window();
+    }
+}
+
+/// Cycle focus to the next or previous window using stack layout.
+/// All windows resize to fit their new positions.
+///
+/// Returns the `WindowId` of the newly focused window, or `None`
+/// if there are fewer than 2 windows.
+pub fn cycle_focus_stack(
+    routes: &mut FxHashMap<WindowId, Route>,
+    window_order: &[WindowId],
+    current_focused: WindowId,
+    screen: &ScreenArea,
+    gap: u32,
+    align_width: f32,
+    reverse: bool,
+) -> Option<WindowId> {
+    if window_order.len() < 2 {
+        return None;
+    }
+
+    let current_idx = window_order
+        .iter()
+        .position(|id| *id == current_focused)
+        .unwrap_or(0);
+
+    let next_idx = if reverse {
+        if current_idx == 0 {
+            window_order.len() - 1
+        } else {
+            current_idx - 1
+        }
+    } else {
+        (current_idx + 1) % window_order.len()
+    };
+
+    let new_focused = window_order[next_idx];
+
+    apply_stack_layout(routes, new_focused, window_order, screen, gap, align_width);
+
+    Some(new_focused)
+}
+
 /// Cycle focus to the next or previous window in order.
 ///
 /// Returns the `WindowId` of the newly focused window, or `None` if

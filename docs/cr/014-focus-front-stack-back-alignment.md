@@ -6,11 +6,11 @@
 
 ## Summary
 
-A second window alignment mode for Rio terminal: **Focus Front / Stack Back**. The focused window is brought to the **frontmost layer at full (or near-full) screen size**, while all unfocused windows are **stacked behind it in a slightly offset cascade**, remaining accessible but visually receded. Cycling focus promotes a different window to the front and pushes the previous one into the back stack. This gives a "card deck" experience — one window dominates the screen, others peek out behind it for quick switching.
+A second window alignment mode for Rio terminal: **Focus Front / Stack Back**. The focused window is brought to the **frontmost layer at full (or near-full) screen size**, while all unfocused windows are **arranged left-to-right behind it, equally filling the entire desktop space**. Cycling focus promotes a different window to the front and rearranges the others behind it. This gives a "stage manager" experience — one window dominates the screen, others are tiled behind it for quick switching.
 
 ## Motivation
 
-CR-001 introduced side-by-side tiling (focused left, others stacked right). That works well for monitoring multiple terminals simultaneously but sacrifices screen real estate for the primary window. Many users prefer a **maximized primary window** workflow where the active terminal uses nearly the full screen and secondary windows stay available but out of the way — similar to macOS Stage Manager or a card stack. This mode keeps the focused window as large as possible while still providing visual cues that other windows exist behind it.
+CR-001 introduced side-by-side tiling (focused left, others stacked right). That works well for monitoring multiple terminals simultaneously but sacrifices screen real estate for the primary window. Many users prefer a **maximized primary window** workflow where the active terminal uses nearly the full screen and secondary windows stay available but out of the way — similar to macOS Stage Manager. This mode keeps the focused window as large as possible while still providing visual cues that other windows exist behind it. When focus switches, **all windows resize to fit their new positions** — the newly focused window expands to fill the front slot, and the previously focused window shrinks to fill its share of the back row.
 
 ## Architecture
 
@@ -26,63 +26,71 @@ The key differences are:
 - A new `align-mode` config option selects between `"side"` (CR-001) and `"stack"` (this CR)
 - A new layout function `apply_stack_layout()` in `router/alignment.rs`
 - The focused window is raised to front via `winit_window.focus_window()` + z-order manipulation
-- Unfocused windows are positioned with a cascade offset behind the focused window
+- Unfocused windows are arranged left-to-right behind the focused window, equally filling the desktop
+- All windows resize when focus switches — the new focus expands, the old focus shrinks into the back row
 
 New `CycleStackWindowNext` / `CycleStackWindowPrev` actions and events are added for cycling focus in the stack layout, bound to `Ctrl+Shift+>` / `Ctrl+Shift+<`. The existing CR-001 side-layout bindings (`Cmd+Shift+>` / `Alt+Shift+>`) remain unchanged.
 
 ## Layout Behavior
 
-### Focus Front + Back Stack
+### Focus Front + Back Row
 
-The focused window is centered (or positioned at a configurable origin) at a large size. Unfocused windows are stacked behind it, each offset slightly down and to the right, creating a visible cascade edge.
+The focused window is centered at a large size and brought to the front (topmost z-order). All unfocused windows are arranged **left-to-right in a row behind it**, each equally sized to fill the entire desktop width. When focus switches, every window resizes to fit its new position.
 
 ```
-     Desktop visible area
-|<----------------------------------------->|
-|                                            |
-|    +---------- Window C (back) ----------+ |
-|    | +-------- Window B (back) --------+ | |
-|    | | +------ Window A (FOCUSED) ----+| | |
-|    | | |                              || | |
-|    | | |    FOCUSED WINDOW            || | |
-|    | | |    (nearly full screen)      || | |
-|    | | |                              || | |
-|    | | +------------------------------+| | |
-|    | +---------------------------------+ | |
-|    +-------------------------------------+ |
-|                                            |
+     Desktop visible area (what the user sees)
+|<------------------------------------------->|
+|                                              |
+|  +--- Win B ---+--- Win C ---+  (behind)     |
+|  |             |             |               |
+|  +--+--- Window A (FOCUSED) ---+--+          |
+|     |                           |            |
+|     |    FOCUSED WINDOW         |            |
+|     |    (nearly full screen)   |            |
+|     |    centered, topmost      |            |
+|     |                           |            |
+|     +---------------------------+            |
+|  |             |             |               |
+|  +-------------+-------------+  (behind)     |
+|                                              |
 ```
+
+The unfocused windows fill the full screen space from left to right, split equally in width and using the full screen height. They sit behind the focused window in z-order.
 
 ### Layout Rules
 
 | Window Count | Focused Window | Unfocused Windows |
 |---|---|---|
 | 1 | No alignment (stays at user's position/size) | none |
-| 2 | Front, centered, `align-width` ratio of screen | 1 behind, offset by `stack-offset` |
-| 3 | Front, centered, `align-width` ratio of screen | 2 behind, cascaded by `stack-offset` each |
-| N | Front, centered, `align-width` ratio of screen | N-1 behind, cascaded by `stack-offset` each |
+| 2 | Front, centered, `align-width` ratio of screen | 1 behind, full screen size |
+| 3 | Front, centered, `align-width` ratio of screen | 2 behind, each 50% screen width, left-to-right |
+| N | Front, centered, `align-width` ratio of screen | N-1 behind, each `1/(N-1)` screen width, left-to-right |
 
 Positioning details:
 - **Single window:** no automatic alignment — window stays at user-defined position and size
 - **Focused (2+ windows):** centered on screen at `align-width` ratio, brought to front (topmost z-order)
-- **Back stack:** each unfocused window is the same size as the focused window, positioned at an increasing offset: window `i` is offset by `i * stack-offset` pixels both rightward and downward from the focused window origin
-- **Z-order:** the focused window is always topmost; back-stack windows are ordered so the next-in-cycle window is directly behind the focused window, and earlier windows are further back
+- **Back row:** unfocused windows are arranged left-to-right, each getting `screen_width / (N-1)` width and full screen height (minus gap and decoration). They are positioned behind the focused window in z-order.
+- **Z-order:** the focused window is always topmost; back-row windows are positioned first so the OS stacks them behind the focused window
+- **Resize on switch:** when focus changes, **all windows resize** — the new focus expands to fill the front slot, the previous focus shrinks to fill its share of the back row
 
 ### Focus Cycling (Carousel)
 
-The same ring-based cycling as CR-001. Cycling promotes the next window to the front and pushes the current one into the back stack.
+The same ring-based cycling as CR-001. Cycling promotes the next window to the front and rearranges all others into the back row.
 
 Example with [A, B, C], focus A:
 ```
-front: A    back stack: [B (offset 1), C (offset 2)]
+front: A (large, centered)
+back row: [B (left half), C (right half)]
 ```
 Cycle next → focus B:
 ```
-front: B    back stack: [C (offset 1), A (offset 2)]
+front: B (large, centered)
+back row: [C (left half), A (right half)]
 ```
 Cycle next → focus C:
 ```
-front: C    back stack: [A (offset 1), B (offset 2)]
+front: C (large, centered)
+back row: [A (left half), B (right half)]
 ```
 
 ### Keybindings
@@ -123,7 +131,7 @@ Same behavior as CR-001: when `keyboard-only-focus = true`, mouse clicks on back
 
 ### 1. Configuration — `rio-backend/src/config/window.rs`
 
-Add a new `align-mode` option and `stack-offset`:
+Add a new `align-mode` option:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -131,7 +139,7 @@ Add a new `align-mode` option and `stack-offset`:
 pub enum AlignMode {
     /// CR-001: focused left, others stacked right (default)
     Side,
-    /// CR-014: focused front, others stacked behind
+    /// CR-014: focused front, others arranged left-to-right behind
     Stack,
 }
 
@@ -142,22 +150,11 @@ impl Default for AlignMode {
 }
 ```
 
-New fields on the `Window` struct:
+New field on the `Window` struct:
 
 ```rust
 #[serde(default = "AlignMode::default", rename = "align-mode")]
 pub align_mode: AlignMode,
-
-#[serde(default = "default_stack_offset", rename = "stack-offset")]
-pub stack_offset: u32,  // default: 30 — pixels of cascade offset per back-stack window
-```
-
-Default helper:
-
-```rust
-fn default_stack_offset() -> u32 {
-    30
-}
 ```
 
 Full TOML example:
@@ -168,7 +165,6 @@ auto-align = true
 align-mode = "stack"       # "side" (CR-001 default) or "stack" (this CR)
 align-width = 0.9          # focused window width as ratio of screen
 align-gap = 20             # pixels of margin around the focused window
-stack-offset = 30          # pixels of cascade offset per back-stack window
 keyboard-only-focus = true
 ```
 
@@ -177,11 +173,12 @@ keyboard-only-focus = true
 Add a new `apply_stack_layout()` function alongside the existing `apply_layout()`:
 
 ```rust
-/// Apply focus-front / stack-back layout.
+/// Apply focus-front / back-row layout.
 ///
 /// The focused window is centered on screen at `align_width` ratio
-/// and brought to the front. Unfocused windows are the same size,
-/// cascaded behind with increasing offset.
+/// and brought to the front. Unfocused windows are arranged
+/// left-to-right behind it, equally filling the full desktop width
+/// and height. All windows resize when focus switches.
 pub fn apply_stack_layout(
     routes: &mut FxHashMap<WindowId, Route>,
     focused_id: WindowId,
@@ -189,7 +186,6 @@ pub fn apply_stack_layout(
     screen: &ScreenArea,
     gap: u32,
     align_width: f32,
-    stack_offset: u32,
 ) {
     let len = window_order.len();
     if len < 2 {
@@ -225,24 +221,33 @@ pub fn apply_stack_layout(
         .position(|id| *id == focused_id)
         .unwrap_or(0);
 
-    let mut stack_windows: Vec<WindowId> =
+    let mut back_windows: Vec<WindowId> =
         Vec::with_capacity(len - 1);
     for step in 1..len {
         let idx = (focused_idx + step) % len;
-        stack_windows.push(window_order[idx]);
+        back_windows.push(window_order[idx]);
     }
 
-    // Position back-stack windows FIRST (furthest back first)
-    // so that when we position the focused window last,
-    // it ends up on top in z-order.
-    for (i, id) in stack_windows.iter().enumerate().rev() {
-        let depth = (i + 1) as i32;
-        let offset = depth * stack_offset as i32;
+    // Back-row: arrange unfocused windows left-to-right,
+    // each getting equal share of the full screen width.
+    // Positioned FIRST so that the focused window (last)
+    // ends up on top in z-order.
+    let back_count = back_windows.len() as u32;
+    let total_back_gaps = (back_count.saturating_sub(1)) * gap;
+    let available_back_width =
+        screen.width.saturating_sub(gap * 2 + total_back_gaps);
+    let back_w = available_back_width / back_count;
+    let back_h = h; // same height as focused window
+
+    for (i, id) in back_windows.iter().enumerate().rev() {
+        let x = screen.x
+            + gap as i32
+            + (i as u32 * (back_w + gap)) as i32;
         let slot = WindowSlot {
-            x: base_x + offset,
-            y: base_y + offset,
-            width: w,
-            height: h,
+            x,
+            y: base_y,
+            width: back_w,
+            height: back_h,
         };
         if let Some(route) = routes.get_mut(id) {
             apply_slot(route, &slot);
@@ -263,6 +268,7 @@ pub fn apply_stack_layout(
 }
 
 /// Cycle focus in stack mode: promote next/prev window to front.
+/// All windows resize to fit their new positions.
 pub fn cycle_focus_stack(
     routes: &mut FxHashMap<WindowId, Route>,
     window_order: &[WindowId],
@@ -270,7 +276,6 @@ pub fn cycle_focus_stack(
     screen: &ScreenArea,
     gap: u32,
     align_width: f32,
-    stack_offset: u32,
     reverse: bool,
 ) -> Option<WindowId> {
     if window_order.len() < 2 {
@@ -301,7 +306,6 @@ pub fn cycle_focus_stack(
         screen,
         gap,
         align_width,
-        stack_offset,
     );
 
     Some(new_focused)
@@ -443,7 +447,6 @@ fn align_windows_with(
                 &screen,
                 self.config.window.align_gap,
                 self.config.window.align_width,
-                self.config.window.stack_offset,
             );
         }
     }
@@ -486,7 +489,6 @@ fn cycle_stack_window_focus(&mut self, reverse: bool) {
         &screen,
         self.config.window.align_gap,
         self.config.window.align_width,
-        self.config.window.stack_offset,
         reverse,
     );
 }
@@ -511,63 +513,69 @@ The existing `cycle_window_focus()` for CR-001 side-layout events remains unchan
 
 ### 9. Platform Notes
 
-**macOS z-order:** `focus_window()` via winit brings a window to the front on macOS. The back-stack windows are positioned first (furthest back to nearest back) so that the OS window stacking order matches the visual cascade. The focused window is positioned last and `focus_window()` is called on it, ensuring it is the topmost window.
+**macOS z-order:** `focus_window()` via winit brings a window to the front on macOS. The back-row windows are positioned first (in reverse order) so that the OS window stacking order places them behind the focused window. The focused window is positioned last and `focus_window()` is called on it, ensuring it is the topmost window.
 
-**Window ordering guarantee:** On macOS, calling `set_outer_position()` on a window may bring it forward. To ensure correct z-order, back-stack windows are positioned in reverse order (furthest back first), and the focused window is positioned and focused last. If this proves insufficient, we may need to use `NSWindow::orderWindow:relativeTo:` via raw platform access.
+**Window ordering guarantee:** On macOS, calling `set_outer_position()` on a window may bring it forward. To ensure correct z-order, back-row windows are positioned in reverse order, and the focused window is positioned and focused last. If this proves insufficient, we may need to use `NSWindow::orderWindow:relativeTo:` via raw platform access.
+
+**Resize on focus switch:** All windows resize when focus changes. The newly focused window expands to `align-width` ratio, the previously focused window shrinks to fit its equal share of the back row. This ensures every window always fits its assigned position.
 
 **Same `core-graphics` dependency** as CR-001 for macOS screen detection.
 
 ## Visual Examples
 
-### 3 windows, Window A focused (align-width: 0.9, gap: 20, stack-offset: 30):
+### 3 windows, Window A focused (align-width: 0.9, gap: 20):
 
 ```
-  +--------------------------------------------------+
-  |gap                                            gap|
-  |   +------- Window C (offset 60,60) --------+     |
-  |   | +------ Window B (offset 30,30) -----+ |     |
-  |   | | +---- Window A (FOCUSED) ---------+ | |     |
-  |   | | |                                 | | |     |
-  |   | | |      FOCUSED WINDOW             | | |     |
-  |   | | |      90% screen width           | | |     |
-  |   | | |      centered                   | | |     |
-  |   | | |                                 | | |     |
-  |   | | +---------------------------------+ | |     |
-  |   | +-----------------------------------+ |       |
-  |   +---------------------------------------+       |
-  |                                                   |
+  +----------------------------------------------------+
+  |gap                                              gap|
+  |  +-- Win C --+gap+-- Win B --+  (back row, behind) |
+  |  |           |   |           |                      |
+  |  |  +---- Window A (FOCUSED) -----+                 |
+  |  |  |                             |                 |
+  |  |  |     FOCUSED WINDOW          |                 |
+  |  |  |     90% screen width        |                 |
+  |  |  |     centered, topmost       |                 |
+  |  |  |                             |                 |
+  |  |  +-----------------------------+                 |
+  |  |           |   |           |                      |
+  |  +-----------+   +-----------+  (back row, behind)  |
+  |                                                     |
 ```
+
+Back row: Win C (left 50%) and Win B (right 50%), full screen height, behind focused.
 
 ### Cycle next → focus B:
 
 ```
-  +--------------------------------------------------+
-  |   +------- Window A (offset 60,60) --------+     |
-  |   | +------ Window C (offset 30,30) -----+ |     |
-  |   | | +---- Window B (FOCUSED) ---------+ | |     |
-  |   | | |                                 | | |     |
-  |   | | |      FOCUSED WINDOW             | | |     |
-  |   | | |      90% screen width           | | |     |
-  |   | | |                                 | | |     |
-  |   | | +---------------------------------+ | |     |
-  |   | +-----------------------------------+ |       |
-  |   +---------------------------------------+       |
+  +----------------------------------------------------+
+  |  +-- Win A --+gap+-- Win C --+  (back row, behind) |
+  |  |           |   |           |                      |
+  |  |  +---- Window B (FOCUSED) -----+                 |
+  |  |  |                             |                 |
+  |  |  |     FOCUSED WINDOW          |                 |
+  |  |  |     90% screen width        |                 |
+  |  |  |                             |                 |
+  |  |  +-----------------------------+                 |
+  |  |           |   |           |                      |
+  |  +-----------+   +-----------+  (back row, behind)  |
 ```
+
+Window A shrinks from focused size to back-row size. Window B expands to focused size.
 
 ### Cycle next → focus C:
 
 ```
-  +--------------------------------------------------+
-  |   +------- Window B (offset 60,60) --------+     |
-  |   | +------ Window A (offset 30,30) -----+ |     |
-  |   | | +---- Window C (FOCUSED) ---------+ | |     |
-  |   | | |                                 | | |     |
-  |   | | |      FOCUSED WINDOW             | | |     |
-  |   | | |      90% screen width           | | |     |
-  |   | | |                                 | | |     |
-  |   | | +---------------------------------+ | |     |
-  |   | +-----------------------------------+ |       |
-  |   +---------------------------------------+       |
+  +----------------------------------------------------+
+  |  +-- Win B --+gap+-- Win A --+  (back row, behind) |
+  |  |           |   |           |                      |
+  |  |  +---- Window C (FOCUSED) -----+                 |
+  |  |  |                             |                 |
+  |  |  |     FOCUSED WINDOW          |                 |
+  |  |  |     90% screen width        |                 |
+  |  |  |                             |                 |
+  |  |  +-----------------------------+                 |
+  |  |           |   |           |                      |
+  |  +-----------+   +-----------+  (back row, behind)  |
 ```
 
 ### Single window:
@@ -578,31 +586,32 @@ The existing `cycle_window_focus()` for CR-001 side-layout events remains unchan
 
 ## Implementation Phases
 
-1. Add `AlignMode` enum, `align_mode` field, and `stack_offset` to `rio-backend/src/config/window.rs`
+1. Add `AlignMode` enum and `align_mode` field to `rio-backend/src/config/window.rs`
 2. Add `CycleStackWindowNext` / `CycleStackWindowPrev` to `RioEvent` enum in `rio-backend/src/event/mod.rs`
 3. Add `CycleStackWindowNext` / `CycleStackWindowPrev` to `Action` enum + string parsing in `frontends/rioterm/src/bindings/mod.rs`
 4. Add default keybindings `Ctrl+Shift+.` / `Ctrl+Shift+,` to all platform binding blocks
-5. Add `apply_stack_layout()` and `cycle_focus_stack()` to `router/alignment.rs`
+5. Add `apply_stack_layout()` and `cycle_focus_stack()` to `router/alignment.rs` — unfocused windows arranged left-to-right filling desktop
 6. Add `cycle_stack_window_next()` / `cycle_stack_window_prev()` to `ContextManager`
 7. Add `Act::CycleStackWindowNext` / `Act::CycleStackWindowPrev` dispatch in `Screen`
 8. Add `cycle_stack_window_focus()` to `Application` and handle the new events in `user_event()`
 9. Modify `align_windows_with()` to dispatch based on `align_mode` config
-10. Test z-order behavior on macOS — ensure focused window is always topmost
-11. Test with 2, 3, 4+ windows to verify cascade offset calculation
-12. Test that `Ctrl+Shift+>` / `<` always uses stack layout, `Cmd+Shift+>` / `<` always uses side layout
-13. If z-order is unreliable via winit, add platform-specific `NSWindow::orderWindow:relativeTo:` fallback
+10. Remove `stack_offset` config field (no longer needed — back row fills desktop evenly)
+11. Test z-order behavior on macOS — ensure focused window is always topmost
+12. Test with 2, 3, 4+ windows to verify all windows resize correctly on focus switch
+13. Test that `Ctrl+Shift+>` / `<` always uses stack layout, `Cmd+Shift+>` / `<` always uses side layout
+14. If z-order is unreliable via winit, add platform-specific `NSWindow::orderWindow:relativeTo:` fallback
 
 ## File Changes
 
 | File | Change |
 |---|---|
-| `rio-backend/src/config/window.rs` | Add `AlignMode` enum, `align_mode` field, `stack_offset` field, defaults |
+| `rio-backend/src/config/window.rs` | Add `AlignMode` enum, `align_mode` field, defaults. Remove `stack_offset` field |
 | `rio-backend/src/event/mod.rs` | Add `CycleStackWindowNext`, `CycleStackWindowPrev` variants to `RioEvent` |
 | `frontends/rioterm/src/bindings/mod.rs` | Add `CycleStackWindowNext`, `CycleStackWindowPrev` to `Action` enum, string parsing, and default keybindings (`Ctrl+Shift+.` / `Ctrl+Shift+,`) |
-| `frontends/rioterm/src/router/alignment.rs` | Add `apply_stack_layout()`, `cycle_focus_stack()` |
+| `frontends/rioterm/src/router/alignment.rs` | Add `apply_stack_layout()` (back-row left-to-right), `cycle_focus_stack()` |
 | `frontends/rioterm/src/context/mod.rs` | Add `cycle_stack_window_next()`, `cycle_stack_window_prev()` methods |
 | `frontends/rioterm/src/screen/mod.rs` | Add dispatch for `Act::CycleStackWindowNext`, `Act::CycleStackWindowPrev` |
-| `frontends/rioterm/src/application.rs` | Add `cycle_stack_window_focus()`, handle new events, modify `align_windows_with()` to match on `align_mode` |
+| `frontends/rioterm/src/application.rs` | Add `cycle_stack_window_focus()`, handle new events, modify `align_windows_with()` to match on `align_mode`. Remove `stack_offset` usage |
 
 ## Dependencies
 

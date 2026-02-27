@@ -250,15 +250,29 @@ impl Application<'_> {
             None => return,
         };
 
-        crate::router::alignment::apply_layout(
-            &mut self.router.routes,
-            focused_id,
-            &self.router.window_order,
-            &screen,
-            self.config.window.peek_width,
-            self.config.window.align_gap,
-            self.config.window.align_width,
-        );
+        match self.config.window.align_mode {
+            rio_backend::config::window::AlignMode::Side => {
+                crate::router::alignment::apply_layout(
+                    &mut self.router.routes,
+                    focused_id,
+                    &self.router.window_order,
+                    &screen,
+                    self.config.window.peek_width,
+                    self.config.window.align_gap,
+                    self.config.window.align_width,
+                );
+            }
+            rio_backend::config::window::AlignMode::Stack => {
+                crate::router::alignment::apply_stack_layout(
+                    &mut self.router.routes,
+                    focused_id,
+                    &self.router.window_order,
+                    &screen,
+                    self.config.window.align_gap,
+                    self.config.window.align_width,
+                );
+            }
+        }
     }
 
     /// Convenience: align using the currently focused window.
@@ -300,6 +314,45 @@ impl Application<'_> {
             focused_id,
             &screen,
             self.config.window.peek_width,
+            self.config.window.align_gap,
+            self.config.window.align_width,
+            reverse,
+        );
+    }
+
+    /// Cycle focus using the stack (front/back) layout.
+    /// Called by CycleStackWindowNext / CycleStackWindowPrev.
+    /// Always uses stack layout regardless of align-mode config.
+    fn cycle_stack_window_focus(&mut self, reverse: bool) {
+        let focused_id = match self
+            .router
+            .get_focused_route()
+            .or_else(|| self.router.window_order.last().copied())
+        {
+            Some(id) => id,
+            None => return,
+        };
+
+        let screen = match self.router.routes.get(&focused_id) {
+            Some(route) => crate::router::alignment::get_available_screen_area(
+                &route.window.winit_window,
+            ),
+            None => return,
+        };
+
+        let screen = match screen {
+            Some(s) => s,
+            None => return,
+        };
+
+        self.keyboard_triggered_focus = true;
+
+        let window_order = self.router.window_order.clone();
+        crate::router::alignment::cycle_focus_stack(
+            &mut self.router.routes,
+            &window_order,
+            focused_id,
+            &screen,
             self.config.window.align_gap,
             self.config.window.align_width,
             reverse,
@@ -1039,6 +1092,16 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             RioEventType::Rio(RioEvent::CycleWindowPrev) => {
                 if self.config.window.auto_align {
                     self.cycle_window_focus(true);
+                }
+            }
+            RioEventType::Rio(RioEvent::CycleStackWindowNext) => {
+                if self.config.window.auto_align {
+                    self.cycle_stack_window_focus(false);
+                }
+            }
+            RioEventType::Rio(RioEvent::CycleStackWindowPrev) => {
+                if self.config.window.auto_align {
+                    self.cycle_stack_window_focus(true);
                 }
             }
             RioEventType::Rio(RioEvent::UpdateProgressBar(exit_code)) => {

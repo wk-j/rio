@@ -604,6 +604,18 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     }
 
     #[inline]
+    pub fn cycle_stack_window_next(&self) {
+        self.event_proxy
+            .send_event(RioEvent::CycleStackWindowNext, self.window_id);
+    }
+
+    #[inline]
+    pub fn cycle_stack_window_prev(&self) {
+        self.event_proxy
+            .send_event(RioEvent::CycleStackWindowPrev, self.window_id);
+    }
+
+    #[inline]
     pub fn event_proxy(&self) -> &T {
         &self.event_proxy
     }

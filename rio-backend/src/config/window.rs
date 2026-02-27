@@ -71,6 +71,21 @@ pub enum WindowsCornerPreference {
     RoundSmall = 3,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AlignMode {
+    /// CR-001: focused left, others stacked right (default)
+    Side,
+    /// CR-014: focused front, others stacked behind
+    Stack,
+}
+
+impl Default for AlignMode {
+    fn default() -> Self {
+        AlignMode::Side
+    }
+}
+
 #[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
 pub struct Window {
     #[serde(default = "default_window_width")]
@@ -112,6 +127,8 @@ pub struct Window {
     pub align_gap: u32,
     #[serde(default = "default_align_width", rename = "align-width")]
     pub align_width: f32,
+    #[serde(default = "AlignMode::default", rename = "align-mode")]
+    pub align_mode: AlignMode,
     /// When true, window focus changes only via keyboard shortcuts (CycleWindowNext/Prev),
     /// ignoring mouse clicks and OS-triggered focus changes for auto-align purposes.
     #[serde(default = "bool::default", rename = "keyboard-only-focus")]
@@ -151,6 +168,7 @@ impl Default for Window {
             peek_width: default_peek_width(),
             align_gap: default_align_gap(),
             align_width: default_align_width(),
+            align_mode: AlignMode::default(),
             keyboard_only_focus: false,
         }
     }

@@ -271,6 +271,8 @@ impl From<String> for Action {
             "cyclewindownext" => Some(Action::CycleWindowNext),
             "cyclewindowprev" => Some(Action::CycleWindowPrev),
             "alignwindows" => Some(Action::AlignWindows),
+            "cyclestackwindownext" => Some(Action::CycleStackWindowNext),
+            "cyclestackwindowprev" => Some(Action::CycleStackWindowPrev),
             "togglevimode" => Some(Action::ToggleViMode),
             "togglefullscreen" => Some(Action::ToggleFullscreen),
             "toggleleadermenu" => Some(Action::ToggleLeaderMenu),
@@ -549,6 +551,12 @@ pub enum Action {
     /// Re-align all windows using focus-centered layout
     AlignWindows,
 
+    /// Cycle focus to next window using stack (front/back) layout
+    CycleStackWindowNext,
+
+    /// Cycle focus to previous window using stack (front/back) layout
+    CycleStackWindowPrev,
+
     /// Allow receiving char input.
     ReceiveChar,
 
@@ -731,6 +739,10 @@ pub fn default_key_bindings(config: &rio_backend::config::Config) -> Vec<KeyBind
         ".", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
         ",", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
         "r", ModifiersState::SUPER | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
+        // Stack layout focus cycling: Ctrl+Shift+> and Ctrl+Shift+<
+        // key_without_modifiers() strips shift, so we match on "." and ","
+        ".", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowPrev;
+        ",", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowNext;
         "0",                          +BindingMode::VI, ~BindingMode::SEARCH;
             ViMotion::First;
         "4",   ModifiersState::SHIFT, +BindingMode::VI, ~BindingMode::SEARCH;
@@ -1129,6 +1141,10 @@ pub fn platform_key_bindings(
         ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
         ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
         "r", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
+        // Stack layout focus cycling: Ctrl+Shift+> and Ctrl+Shift+<
+        // key_without_modifiers() strips shift, so we match on "." and ","
+        ".", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowPrev;
+        ",", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowNext;
     );
 
     if use_navigation_key_bindings {
@@ -1222,6 +1238,10 @@ pub fn platform_key_bindings(
         ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
         ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
         "r", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
+        // Stack layout focus cycling: Ctrl+Shift+> and Ctrl+Shift+<
+        // key_without_modifiers() strips shift, so we match on "." and ","
+        ".", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowPrev;
+        ",", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowNext;
     );
 
     if use_navigation_key_bindings {

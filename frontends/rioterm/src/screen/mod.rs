@@ -947,6 +947,12 @@ impl Screen<'_> {
             Act::AlignWindows => self.context_manager.align_windows(),
             Act::CycleWindowNext => self.context_manager.cycle_window_next(),
             Act::CycleWindowPrev => self.context_manager.cycle_window_prev(),
+            Act::CycleStackWindowNext => {
+                self.context_manager.cycle_stack_window_next();
+            }
+            Act::CycleStackWindowPrev => {
+                self.context_manager.cycle_stack_window_prev();
+            }
             _ => {}
         }
     }
@@ -1393,6 +1399,12 @@ impl Screen<'_> {
                     }
                     Act::AlignWindows => {
                         self.context_manager.align_windows();
+                    }
+                    Act::CycleStackWindowNext => {
+                        self.context_manager.cycle_stack_window_next();
+                    }
+                    Act::CycleStackWindowPrev => {
+                        self.context_manager.cycle_stack_window_prev();
                     }
                     Act::CloseCurrentSplitOrTab => {
                         self.close_split_or_tab();
