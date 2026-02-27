@@ -259,6 +259,42 @@ pub fn apply_stack_layout(
 ) {
     let len = window_order.len();
     if len < 2 {
+        // When wallpaper_back is active the single remaining window
+        // may have been a back-row window at Desktop level and
+        // back-row size. Resize it to the focused slot so it looks
+        // correct as the only window on screen.
+        if wallpaper_back && len == 1 {
+            if let Some(route) = routes.get_mut(&focused_id) {
+                let decoration_height = {
+                    let outer = route.window.winit_window.outer_size();
+                    let inner = route.window.winit_window.inner_size();
+                    let scale = route.window.winit_window.scale_factor();
+                    ((outer.height.saturating_sub(inner.height)) as f64 / scale) as u32
+                };
+                let ratio = align_width.clamp(0.1, 1.0);
+                let w = (screen.width.saturating_sub(gap * 2) as f32 * ratio) as u32;
+                let full_h = screen.height.saturating_sub(gap * 2 + decoration_height);
+                let h_ratio = align_height.clamp(0.1, 1.0);
+                let h = (full_h as f32 * h_ratio) as u32;
+                let x = screen.x + ((screen.width.saturating_sub(w)) / 2) as i32;
+                let base_y = screen.y + gap as i32;
+                let y = base_y + ((full_h.saturating_sub(h)) / 2) as i32;
+                apply_slot(
+                    route,
+                    &WindowSlot {
+                        x,
+                        y,
+                        width: w,
+                        height: h,
+                    },
+                );
+                route
+                    .window
+                    .winit_window
+                    .set_window_level(WindowLevel::Normal);
+                route.window.winit_window.focus_window();
+            }
+        }
         return;
     }
 

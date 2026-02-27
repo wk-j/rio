@@ -238,8 +238,15 @@ impl Application<'_> {
     /// If `override_focused` is Some, use that as the focused window instead of querying.
     /// Skips alignment when there's only 1 window (leaves it at user's position/size).
     fn align_windows_with(&mut self, override_focused: Option<WindowId>) {
-        // Skip alignment for 0 or 1 window - no need to align a single window
-        if self.router.window_order.len() < 2 {
+        // Skip alignment for 0 or 1 window — unless wallpaper-back
+        // stack mode is active, where the single remaining window may
+        // need to be resized from back-row to focused size.
+        let wallpaper_stack = self.config.window.wallpaper_back
+            && matches!(
+                self.active_align_mode,
+                rio_backend::config::window::AlignMode::Stack
+            );
+        if self.router.window_order.len() < 2 && !wallpaper_stack {
             return;
         }
 
