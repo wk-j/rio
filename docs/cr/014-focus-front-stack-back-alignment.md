@@ -8,6 +8,8 @@
 
 A second window alignment mode for Rio terminal: **Focus Front / Stack Back**. The focused window is brought to the **frontmost layer at full (or near-full) screen size**, while all unfocused windows are **arranged left-to-right behind it, equally filling the entire desktop space**. Cycling focus promotes a different window to the front and rearranges the others behind it. This gives a "stage manager" experience — one window dominates the screen, others are tiled behind it for quick switching. In stack mode, the focused window height is independently configurable via `align-height`.
 
+Optionally, unfocused windows can be sent to the **desktop wallpaper layer** (`wallpaper-back = true`), placing them behind all other applications — effectively turning them into live terminal wallpapers. When focus cycles, the newly focused window is promoted from the wallpaper layer back to the normal window level, and the previously focused window is demoted to the wallpaper layer. This is inspired by macOS apps that render content at the `kCGDesktopWindowLevel` (see [wallpaper-play](https://github.com/wk-j/wallpaper-play/issues/6)).
+
 ## Motivation
 
 CR-001 introduced side-by-side tiling (focused left, others stacked right). That works well for monitoring multiple terminals simultaneously but sacrifices screen real estate for the primary window. Many users prefer a **maximized primary window** workflow where the active terminal uses nearly the full screen and secondary windows stay available but out of the way — similar to macOS Stage Manager. This mode keeps the focused window as large as possible while still providing visual cues that other windows exist behind it. When focus switches, **all windows resize to fit their new positions** — the newly focused window expands to fill the front slot, and the previously focused window shrinks to fill its share of the back row.
@@ -57,6 +59,8 @@ The focused window is centered at a large size and brought to the front (topmost
 
 The unfocused windows fill the full screen space from left to right, split equally in width and using the full screen height. They sit behind the focused window in z-order.
 
+When `wallpaper-back = true`, unfocused windows are sent to the **macOS desktop wallpaper layer** (`kCGDesktopWindowLevel + 1`), placing them behind all normal application windows — they become live terminal wallpapers visible on the desktop background. The focused window stays at the normal window level. When focus cycles, the newly focused window is promoted back to normal level and the previously focused window is demoted to the wallpaper layer.
+
 ### Layout Rules
 
 | Window Count | Focused Window | Unfocused Windows |
@@ -70,8 +74,8 @@ Positioning details:
 - **Single window:** no automatic alignment — window stays at user-defined position and size
 - **Focused (2+ windows):** centered on screen at `align-width` ratio. In stack mode, height is controlled by `align-height` ratio. Brought to front (topmost z-order)
 - **Back row:** unfocused windows are arranged left-to-right, each getting `screen_width / (N-1)` width and full screen height (minus gap and decoration). They are positioned behind the focused window in z-order.
-- **Z-order:** the focused window is always topmost; back-row windows are positioned first so the OS stacks them behind the focused window
-- **Resize on switch:** when focus changes, **all windows resize** — the new focus expands to fill the front slot, the previous focus shrinks to fill its share of the back row
+- **Z-order:** the focused window is always topmost; back-row windows are positioned first so the OS stacks them behind the focused window. When `wallpaper-back = true`, back-row windows are set to `kCGDesktopWindowLevel + 1` (wallpaper layer) and the focused window is restored to normal window level
+- **Resize on switch:** when focus changes, **all windows resize** — the new focus expands to fill the front slot and is promoted to normal window level, the previous focus shrinks to fill its share of the back row and is demoted to the wallpaper layer (if `wallpaper-back` is enabled)
 
 ### Focus Cycling (Carousel)
 
@@ -175,7 +179,18 @@ pub align_mode: AlignMode,
 pub align_height: f32,
 ```
 
-With default:
+```rust
+/// When true, unfocused windows in stack mode are sent to the
+/// macOS desktop wallpaper layer (kCGDesktopWindowLevel + 1),
+/// placing them behind all normal applications. The focused
+/// window stays at the normal window level. On non-macOS
+/// platforms this option is ignored.
+/// Default: false.
+#[serde(default = "bool::default", rename = "wallpaper-back")]
+pub wallpaper_back: bool,
+```
+
+With defaults:
 
 ```rust
 fn default_align_height() -> f32 {
@@ -193,6 +208,7 @@ align-width = 0.9          # focused window width as ratio of screen (0.1–1.0)
 align-height = 0.9         # focused window height in stack mode (0.1–1.0, stack layout only)
 align-gap = 20             # pixels of margin around the focused window
 keyboard-only-focus = true
+wallpaper-back = false     # send unfocused windows to desktop wallpaper layer (macOS only, stack mode)
 ```
 
 ### 2. Layout Engine — `router/alignment.rs`
@@ -506,6 +522,116 @@ The existing `cycle_window_focus()` for CR-001 side-layout events remains unchan
 
 **Same `core-graphics` dependency** as CR-001 for macOS screen detection.
 
+### 10. Wallpaper Back Layer — `router/alignment.rs` + platform code (macOS only)
+
+When `wallpaper-back = true` and the active align mode is `Stack`, unfocused windows are demoted to the macOS **desktop wallpaper layer** so they appear behind all normal application windows, acting as live terminal wallpapers.
+
+#### macOS Window Levels
+
+macOS organizes windows into layers by `NSWindowLevel` (backed by `CGWindowLevel`). Key levels from lowest to highest:
+
+| Level | CGWindowLevelForKey constant | Value (approx) | Description |
+|---|---|---|---|
+| Desktop | `kCGDesktopWindowLevelKey` | -2147483623 | Desktop icons (Finder) |
+| Desktop + 1 | `kCGDesktopWindowLevelKey + 1` | -2147483622 | **Wallpaper apps** — above desktop, below everything else |
+| Normal | `kCGNormalWindowLevelKey` | 0 | Standard application windows |
+| Floating | `kCGFloatingWindowLevelKey` | 3 | Always-on-top panels |
+
+By setting an `NSWindow`'s level to `kCGDesktopWindowLevel + 1`, the window sits just above the desktop background but below all normal app windows — it becomes a "live wallpaper".
+
+#### How It Works
+
+```
+┌─────────────────────────────────────────────────┐
+│  Normal Window Level (0)                        │
+│  ┌───────────────────────────────────────────┐  │
+│  │  Focused Rio Terminal (front, interactive) │  │
+│  │  Normal NSWindowLevel — receives input      │  │
+│  └───────────────────────────────────────────┘  │
+│                                                 │
+│  ── other apps are here (browsers, editors) ──  │
+│                                                 │
+├─────────────────────────────────────────────────┤
+│  Desktop + 1 Level (wallpaper layer)            │
+│  ┌──── Win B ────┬──── Win C ────┐              │
+│  │  unfocused    │  unfocused    │              │
+│  │  terminal     │  terminal     │              │
+│  │  (wallpaper)  │  (wallpaper)  │              │
+│  └───────────────┴───────────────┘              │
+├─────────────────────────────────────────────────┤
+│  Desktop Level                                  │
+│  ┌───────────────────────────────────────────┐  │
+│  │  Finder desktop icons / actual wallpaper   │  │
+│  └───────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
+#### Implementation Detail
+
+The window level manipulation uses raw `NSWindow` access via `rio-window`'s platform-specific APIs:
+
+```rust
+#[cfg(target_os = "macos")]
+mod wallpaper {
+    extern "C" {
+        fn CGWindowLevelForKey(key: i32) -> i32;
+    }
+    const K_CG_DESKTOP_WINDOW_LEVEL_KEY: i32 = 2;
+    const K_CG_NORMAL_WINDOW_LEVEL_KEY: i32 = 4;
+
+    /// Get the desktop wallpaper window level (just above
+    /// the actual desktop, below all normal windows).
+    pub fn wallpaper_level() -> i32 {
+        unsafe { CGWindowLevelForKey(K_CG_DESKTOP_WINDOW_LEVEL_KEY) + 1 }
+    }
+
+    /// Get the normal window level.
+    pub fn normal_level() -> i32 {
+        unsafe { CGWindowLevelForKey(K_CG_NORMAL_WINDOW_LEVEL_KEY) }
+    }
+}
+```
+
+In `apply_stack_layout()`, after positioning windows:
+
+```rust
+// If wallpaper-back is enabled, set window levels:
+if wallpaper_back {
+    #[cfg(target_os = "macos")]
+    {
+        // Demote unfocused windows to wallpaper layer
+        for id in &back_windows {
+            if let Some(route) = routes.get_mut(id) {
+                route.window.winit_window
+                    .set_window_level(wallpaper::wallpaper_level());
+            }
+        }
+        // Promote focused window to normal level
+        if let Some(route) = routes.get_mut(&focused_id) {
+            route.window.winit_window
+                .set_window_level(wallpaper::normal_level());
+        }
+    }
+}
+```
+
+#### Window Level Transitions on Focus Cycle
+
+When focus cycles from window A to window B:
+
+1. **Window A** (previously focused): resized to back-row slot, level set to `kCGDesktopWindowLevel + 1` (wallpaper layer)
+2. **Window B** (newly focused): resized to focused slot, level set to `kCGNormalWindowLevel` (normal), `focus_window()` called
+3. **Other back-row windows**: remain at wallpaper level, repositioned
+
+#### Behavior Notes
+
+- **Non-macOS platforms:** `wallpaper-back` is ignored — windows stay at normal level with standard z-ordering
+- **Disabling:** Setting `wallpaper-back = false` (or omitting it) restores all windows to normal level and uses the default z-order stacking behavior
+- **Config reload:** When `wallpaper-back` changes from `true` to `false`, all windows are restored to normal window level
+- **Interaction:** Windows at the wallpaper level cannot receive mouse clicks or keyboard input through normal means — only the focused window (at normal level) is interactive. Cycling focus via keyboard shortcuts (`Ctrl+Shift+>/<`) is required
+- **Show Desktop:** macOS "Show Desktop" (F11) hides normal-level windows, revealing the wallpaper-level terminal windows — they become fully visible as if they were the desktop background
+- **Spaces:** Wallpaper-level windows should use `NSWindowCollectionBehavior::CanJoinAllSpaces | Stationary` to appear on all virtual desktops, or `MoveToActiveSpace` to follow the user (configurable)
+
 ## Visual Examples
 
 ### 3 windows, Window A focused (align-width: 0.9, align-height: 1.0, gap: 20):
@@ -585,15 +711,20 @@ Window A shrinks from focused size to back-row size. Window B expands to focused
 12. Test with 2, 3, 4+ windows to verify all windows resize correctly on focus switch
 13. Test that `Ctrl+Shift+>` / `<` always uses stack layout, `Cmd+Shift+>` / `<` always uses side layout
 14. If z-order is unreliable via winit, add platform-specific `NSWindow::orderWindow:relativeTo:` fallback
+15. Add `wallpaper_back` config field and default to `rio-backend/src/config/window.rs`
+16. Implement `CGWindowLevelForKey` wrapper in platform-specific module (macOS)
+17. Add window level transitions in `apply_stack_layout()` — demote unfocused to wallpaper layer, promote focused to normal level
+18. Handle config reload: restore all windows to normal level when `wallpaper-back` changes from `true` to `false`
+19. Test wallpaper layer behavior: verify unfocused windows sit behind all apps, verify "Show Desktop" (F11) reveals them, verify focus cycling promotes/demotes correctly
 
 ## File Changes
 
 | File | Change |
 |---|---|
-| `rio-backend/src/config/window.rs` | Add `AlignMode` enum, `align_mode` field, `align_height` field, defaults. Remove `stack_offset` field |
+| `rio-backend/src/config/window.rs` | Add `AlignMode` enum, `align_mode` field, `align_height` field, `wallpaper_back` field, defaults. Remove `stack_offset` field |
 | `rio-backend/src/event/mod.rs` | Add `CycleStackWindowNext`, `CycleStackWindowPrev` variants to `RioEvent` |
 | `frontends/rioterm/src/bindings/mod.rs` | Add `CycleStackWindowNext`, `CycleStackWindowPrev` to `Action` enum, string parsing, and default keybindings (`Ctrl+Shift+.` / `Ctrl+Shift+,`) |
-| `frontends/rioterm/src/router/alignment.rs` | Add `apply_stack_layout()` (back-row left-to-right), `cycle_focus_stack()`. Add `align_height` parameter to `apply_stack_layout()` and `cycle_focus_stack()` (stack layout only — side layout uses full height) |
+| `frontends/rioterm/src/router/alignment.rs` | Add `apply_stack_layout()` (back-row left-to-right), `cycle_focus_stack()`. Add `align_height` parameter to `apply_stack_layout()` and `cycle_focus_stack()` (stack layout only). Add `wallpaper_back` parameter for window level manipulation (macOS) |
 | `frontends/rioterm/src/context/mod.rs` | Add `cycle_stack_window_next()`, `cycle_stack_window_prev()` methods |
 | `frontends/rioterm/src/screen/mod.rs` | Add dispatch for `Act::CycleStackWindowNext`, `Act::CycleStackWindowPrev` |
 | `frontends/rioterm/src/application.rs` | Add `cycle_stack_window_focus()`, handle new events, modify `align_windows_with()` to match on `align_mode`. Remove `stack_offset` usage |
@@ -601,4 +732,5 @@ Window A shrinks from focused size to back-row size. Window B expands to focused
 ## Dependencies
 
 - Same as CR-001: `winit`/`rio-window`, `core-graphics` (macOS)
-- No new external dependencies
+- `wallpaper-back` feature requires `CGWindowLevelForKey` from Core Graphics framework (already linked via `core-graphics` crate) and `NSWindow::setLevel` access via `rio-window` platform APIs
+- No new external crate dependencies
