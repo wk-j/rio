@@ -358,7 +358,7 @@ impl Window {
     #[inline]
     pub fn set_window_level(&self, level: window::WindowLevel) {
         match level {
-            window::WindowLevel::AlwaysOnBottom => {
+            window::WindowLevel::Desktop | window::WindowLevel::AlwaysOnBottom => {
                 let _ = self.set_flag(ORBITAL_FLAG_BACK, true);
             }
             window::WindowLevel::Normal => {

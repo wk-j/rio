@@ -1614,6 +1614,7 @@ impl WindowDelegate {
     #[inline]
     pub fn set_window_level(&self, level: WindowLevel) {
         let level = match level {
+            WindowLevel::Desktop => (ffi::kCGDesktopWindowLevel + 1) as NSWindowLevel,
             WindowLevel::AlwaysOnTop => ffi::kCGFloatingWindowLevel as NSWindowLevel,
             WindowLevel::AlwaysOnBottom => {
                 (ffi::kCGNormalWindowLevel - 1) as NSWindowLevel

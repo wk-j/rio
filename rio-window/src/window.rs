@@ -1825,6 +1825,11 @@ bitflags::bitflags! {
 /// - **iOS / Android / Web / Wayland:** Unsupported.
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub enum WindowLevel {
+    /// The window sits just above the desktop background, below all
+    /// normal application windows. On macOS this maps to
+    /// `kCGDesktopWindowLevel + 1` (the wallpaper layer).
+    Desktop,
+
     /// The window will always be below normal windows.
     ///
     /// This is useful for a widget-based app.

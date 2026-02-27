@@ -1,8 +1,19 @@
 use rio_backend::event::WindowId;
 use rio_window::dpi::{LogicalPosition, LogicalSize};
+use rio_window::window::WindowLevel;
 use rustc_hash::FxHashMap;
 
 use super::Route;
+
+/// Approximate menu bar height in logical points.
+/// On macOS this accounts for the menu bar subtracted by
+/// `get_available_screen_area`. `apply_stack_layout` reverses
+/// this offset for wallpaper-back windows that cover the full
+/// display including the menu bar area.
+#[cfg(target_os = "macos")]
+const MENU_BAR_HEIGHT: u32 = 25;
+#[cfg(not(target_os = "macos"))]
+const MENU_BAR_HEIGHT: u32 = 0;
 
 /// Represents the usable screen area.
 #[derive(Debug, Clone, Copy)]
@@ -46,12 +57,11 @@ pub fn get_available_screen_area(
         // notch displays). This avoids using NSScreen which can crash
         // during enumeration. The decoration-height logic in apply_layout
         // handles the remaining adjustments.
-        let menu_bar_height: u32 = 25;
         Some(ScreenArea {
             x: bounds.origin.x as i32,
-            y: bounds.origin.y as i32 + menu_bar_height as i32,
+            y: bounds.origin.y as i32 + MENU_BAR_HEIGHT as i32,
             width,
-            height: height.saturating_sub(menu_bar_height),
+            height: height.saturating_sub(MENU_BAR_HEIGHT),
         })
     }
     #[cfg(not(target_os = "macos"))]
@@ -245,6 +255,7 @@ pub fn apply_stack_layout(
     gap: u32,
     align_width: f32,
     align_height: f32,
+    wallpaper_back: bool,
 ) {
     let len = window_order.len();
     if len < 2 {
@@ -289,21 +300,50 @@ pub fn apply_stack_layout(
     // each getting an equal share of the full screen width.
     // Positioned in reverse order (rightmost first) so that
     // the focused window (positioned last) ends up on top.
+    //
+    // When wallpaper_back is enabled the back-row windows sit on the
+    // desktop wallpaper layer, so they expand edge-to-edge without
+    // any gap or border — they fill the entire screen area.
     let back_count = back_windows.len() as u32;
-    let total_back_gaps = back_count.saturating_sub(1) * gap;
-    let available_back_width = screen.width.saturating_sub(gap * 2 + total_back_gaps);
+    let back_gap = if wallpaper_back { 0 } else { gap };
+    let total_back_gaps = back_count.saturating_sub(1) * back_gap;
+    let available_back_width =
+        screen.width.saturating_sub(back_gap * 2 + total_back_gaps);
     let back_w = available_back_width / back_count;
+    // When wallpaper_back is enabled, back-row windows cover the
+    // full display including the menu bar area. The `screen` passed
+    // in has the menu bar already subtracted, so we reverse that
+    // adjustment to get the raw display origin and height.
+    let back_y = if wallpaper_back {
+        screen.y - MENU_BAR_HEIGHT as i32
+    } else {
+        base_y
+    };
+    let back_h = if wallpaper_back {
+        (screen.height + MENU_BAR_HEIGHT).saturating_sub(decoration_height)
+    } else {
+        full_h
+    };
+
+    // Window level for unfocused back-row windows: Desktop (wallpaper
+    // layer) when wallpaper_back is enabled, Normal otherwise.
+    let back_level = if wallpaper_back {
+        WindowLevel::Desktop
+    } else {
+        WindowLevel::Normal
+    };
 
     for (i, id) in back_windows.iter().enumerate().rev() {
-        let x = screen.x + gap as i32 + (i as u32 * (back_w + gap)) as i32;
+        let x = screen.x + back_gap as i32 + (i as u32 * (back_w + back_gap)) as i32;
         let slot = WindowSlot {
             x,
-            y: base_y,
+            y: back_y,
             width: back_w,
-            height: full_h,
+            height: back_h,
         };
         if let Some(route) = routes.get_mut(id) {
             apply_slot(route, &slot);
+            route.window.winit_window.set_window_level(back_level);
         }
     }
 
@@ -316,6 +356,10 @@ pub fn apply_stack_layout(
     };
     if let Some(route) = routes.get_mut(&focused_id) {
         apply_slot(route, &focused_slot);
+        route
+            .window
+            .winit_window
+            .set_window_level(WindowLevel::Normal);
         route.window.winit_window.focus_window();
     }
 }
@@ -333,6 +377,7 @@ pub fn cycle_focus_stack(
     gap: u32,
     align_width: f32,
     align_height: f32,
+    wallpaper_back: bool,
     reverse: bool,
 ) -> Option<WindowId> {
     if window_order.len() < 2 {
@@ -364,6 +409,7 @@ pub fn cycle_focus_stack(
         gap,
         align_width,
         align_height,
+        wallpaper_back,
     );
 
     Some(new_focused)

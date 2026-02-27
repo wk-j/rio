@@ -568,52 +568,56 @@ By setting an `NSWindow`'s level to `kCGDesktopWindowLevel + 1`, the window sits
 
 #### Implementation Detail
 
-The window level manipulation uses raw `NSWindow` access via `rio-window`'s platform-specific APIs:
+The window level manipulation uses the cross-platform `WindowLevel` enum from `rio-window`. A new `Desktop` variant was added to the existing enum:
 
 ```rust
-#[cfg(target_os = "macos")]
-mod wallpaper {
-    extern "C" {
-        fn CGWindowLevelForKey(key: i32) -> i32;
-    }
-    const K_CG_DESKTOP_WINDOW_LEVEL_KEY: i32 = 2;
-    const K_CG_NORMAL_WINDOW_LEVEL_KEY: i32 = 4;
+// rio-window/src/window.rs
+pub enum WindowLevel {
+    /// Sits just above the desktop background, below all normal
+    /// windows. On macOS maps to kCGDesktopWindowLevel + 1.
+    Desktop,
+    AlwaysOnBottom,
+    #[default]
+    Normal,
+    AlwaysOnTop,
+}
+```
 
-    /// Get the desktop wallpaper window level (just above
-    /// the actual desktop, below all normal windows).
-    pub fn wallpaper_level() -> i32 {
-        unsafe { CGWindowLevelForKey(K_CG_DESKTOP_WINDOW_LEVEL_KEY) + 1 }
-    }
+The macOS window delegate maps `Desktop` to the wallpaper layer:
 
-    /// Get the normal window level.
-    pub fn normal_level() -> i32 {
-        unsafe { CGWindowLevelForKey(K_CG_NORMAL_WINDOW_LEVEL_KEY) }
-    }
+```rust
+// rio-window/src/platform_impl/macos/window_delegate.rs
+WindowLevel::Desktop => {
+    (ffi::kCGDesktopWindowLevel + 1) as NSWindowLevel
 }
 ```
 
 In `apply_stack_layout()`, after positioning windows:
 
 ```rust
-// If wallpaper-back is enabled, set window levels:
-if wallpaper_back {
-    #[cfg(target_os = "macos")]
-    {
-        // Demote unfocused windows to wallpaper layer
-        for id in &back_windows {
-            if let Some(route) = routes.get_mut(id) {
-                route.window.winit_window
-                    .set_window_level(wallpaper::wallpaper_level());
-            }
-        }
-        // Promote focused window to normal level
-        if let Some(route) = routes.get_mut(&focused_id) {
-            route.window.winit_window
-                .set_window_level(wallpaper::normal_level());
-        }
+let back_level = if wallpaper_back {
+    WindowLevel::Desktop
+} else {
+    WindowLevel::Normal
+};
+
+// Set unfocused back-row windows to wallpaper layer (or normal)
+for (i, id) in back_windows.iter().enumerate().rev() {
+    if let Some(route) = routes.get_mut(id) {
+        apply_slot(route, &slot);
+        route.window.winit_window.set_window_level(back_level);
     }
 }
+
+// Focused window always at normal level
+if let Some(route) = routes.get_mut(&focused_id) {
+    apply_slot(route, &focused_slot);
+    route.window.winit_window.set_window_level(WindowLevel::Normal);
+    route.window.winit_window.focus_window();
+}
 ```
+
+On config reload, all windows are first restored to `WindowLevel::Normal` before re-alignment, ensuring that windows are brought back from the wallpaper layer when `wallpaper-back` is disabled or the mode changes.
 
 #### Window Level Transitions on Focus Cycle
 
@@ -712,8 +716,8 @@ Window A shrinks from focused size to back-row size. Window B expands to focused
 13. Test that `Ctrl+Shift+>` / `<` always uses stack layout, `Cmd+Shift+>` / `<` always uses side layout
 14. If z-order is unreliable via winit, add platform-specific `NSWindow::orderWindow:relativeTo:` fallback
 15. Add `wallpaper_back` config field and default to `rio-backend/src/config/window.rs`
-16. Implement `CGWindowLevelForKey` wrapper in platform-specific module (macOS)
-17. Add window level transitions in `apply_stack_layout()` — demote unfocused to wallpaper layer, promote focused to normal level
+16. Add `Desktop` variant to `WindowLevel` enum in `rio-window/src/window.rs`, map to `kCGDesktopWindowLevel + 1` in macOS delegate
+17. Add window level transitions in `apply_stack_layout()` — demote unfocused to `WindowLevel::Desktop`, promote focused to `WindowLevel::Normal`
 18. Handle config reload: restore all windows to normal level when `wallpaper-back` changes from `true` to `false`
 19. Test wallpaper layer behavior: verify unfocused windows sit behind all apps, verify "Show Desktop" (F11) reveals them, verify focus cycling promotes/demotes correctly
 
@@ -727,10 +731,13 @@ Window A shrinks from focused size to back-row size. Window B expands to focused
 | `frontends/rioterm/src/router/alignment.rs` | Add `apply_stack_layout()` (back-row left-to-right), `cycle_focus_stack()`. Add `align_height` parameter to `apply_stack_layout()` and `cycle_focus_stack()` (stack layout only). Add `wallpaper_back` parameter for window level manipulation (macOS) |
 | `frontends/rioterm/src/context/mod.rs` | Add `cycle_stack_window_next()`, `cycle_stack_window_prev()` methods |
 | `frontends/rioterm/src/screen/mod.rs` | Add dispatch for `Act::CycleStackWindowNext`, `Act::CycleStackWindowPrev` |
-| `frontends/rioterm/src/application.rs` | Add `cycle_stack_window_focus()`, handle new events, modify `align_windows_with()` to match on `align_mode`. Remove `stack_offset` usage |
+| `frontends/rioterm/src/application.rs` | Add `cycle_stack_window_focus()`, handle new events, modify `align_windows_with()` to match on `align_mode`. Remove `stack_offset` usage. Restore all windows to `Normal` level on config reload before re-alignment |
+| `rio-window/src/window.rs` | Add `Desktop` variant to `WindowLevel` enum |
+| `rio-window/src/platform_impl/macos/window_delegate.rs` | Map `WindowLevel::Desktop` to `(kCGDesktopWindowLevel + 1) as NSWindowLevel` |
+| `rio-window/src/platform_impl/orbital/window.rs` | Handle `WindowLevel::Desktop` (treated as `AlwaysOnBottom`) |
 
 ## Dependencies
 
 - Same as CR-001: `winit`/`rio-window`, `core-graphics` (macOS)
-- `wallpaper-back` feature requires `CGWindowLevelForKey` from Core Graphics framework (already linked via `core-graphics` crate) and `NSWindow::setLevel` access via `rio-window` platform APIs
+- `wallpaper-back` feature uses `kCGDesktopWindowLevel` constant from `rio-window/src/platform_impl/macos/ffi.rs` (already defined) and `NSWindow::setLevel` access via `rio-window` platform APIs
 - No new external crate dependencies

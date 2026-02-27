@@ -284,6 +284,7 @@ impl Application<'_> {
                     self.config.window.align_gap,
                     self.config.window.align_width,
                     self.config.window.align_height,
+                    self.config.window.wallpaper_back,
                 );
             }
         }
@@ -292,6 +293,41 @@ impl Application<'_> {
     /// Convenience: align using the currently focused window.
     fn align_windows(&mut self) {
         self.align_windows_with(None);
+    }
+
+    /// Called after a window is closed when wallpaper-back stack mode
+    /// is active. Promotes a remaining window from the Desktop
+    /// (wallpaper) layer to Normal level and gives it focus. Without
+    /// this, the last remaining window(s) would be stuck behind all
+    /// applications with no way to interact.
+    fn restore_focus_after_close(&mut self) {
+        if !self.config.window.wallpaper_back {
+            return;
+        }
+        if !matches!(
+            self.active_align_mode,
+            rio_backend::config::window::AlignMode::Stack
+        ) {
+            return;
+        }
+
+        // Pick the window that should receive focus: prefer the one
+        // already focused (unlikely after close), then fall back to
+        // the last window in the order.
+        let target = self
+            .router
+            .get_focused_route()
+            .or_else(|| self.router.window_order.last().copied());
+
+        if let Some(id) = target {
+            if let Some(route) = self.router.routes.get(&id) {
+                route
+                    .window
+                    .winit_window
+                    .set_window_level(rio_window::window::WindowLevel::Normal);
+                route.window.winit_window.focus_window();
+            }
+        }
     }
 
     /// Cycle focus to the next or previous window and re-align.
@@ -379,6 +415,7 @@ impl Application<'_> {
             self.config.window.align_gap,
             self.config.window.align_width,
             self.config.window.align_height,
+            self.config.window.wallpaper_back,
             reverse,
         );
     }
@@ -696,6 +733,18 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     }
                 }
 
+                // Restore all windows to normal level before re-align.
+                // This ensures that windows previously sent to the
+                // desktop layer (wallpaper-back) are brought back to
+                // normal when wallpaper-back is disabled or the mode
+                // switches away from Stack.
+                for route in self.router.routes.values() {
+                    route
+                        .window
+                        .winit_window
+                        .set_window_level(rio_window::window::WindowLevel::Normal);
+                }
+
                 // Re-align windows after config reload
                 if self.config.window.auto_align {
                     self.align_windows();
@@ -726,8 +775,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
                         if self.router.routes.is_empty() {
                             event_loop.exit();
-                        } else if self.config.window.auto_align {
-                            self.align_windows();
+                        } else {
+                            // Promote a remaining window from the
+                            // wallpaper layer so it can receive focus.
+                            self.restore_focus_after_close();
+                            if self.config.window.auto_align {
+                                self.align_windows();
+                            }
                         }
                     } else {
                         let size = route.window.screen.context_manager.len();
@@ -1032,8 +1086,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 self.router.remove_window(&window_id);
                 if self.router.routes.is_empty() && !self.config.confirm_before_quit {
                     event_loop.exit();
-                } else if self.config.window.auto_align {
-                    self.align_windows();
+                } else {
+                    // Promote a remaining window from the wallpaper
+                    // layer so it can receive focus.
+                    self.restore_focus_after_close();
+                    if self.config.window.auto_align {
+                        self.align_windows();
+                    }
                 }
             }
             #[cfg(target_os = "macos")]
@@ -1239,6 +1298,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 // MacOS doesn't exit the loop
                 if cfg!(target_os = "macos") && self.config.confirm_before_quit {
                     self.router.remove_window(&window_id);
+                    self.restore_focus_after_close();
                     return;
                 }
 
@@ -1252,8 +1312,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
                 if self.router.routes.is_empty() {
                     event_loop.exit();
-                } else if self.config.window.auto_align {
-                    self.align_windows();
+                } else {
+                    // Promote a remaining window from the wallpaper
+                    // layer so it can receive focus.
+                    self.restore_focus_after_close();
+                    if self.config.window.auto_align {
+                        self.align_windows();
+                    }
                 }
             }
 

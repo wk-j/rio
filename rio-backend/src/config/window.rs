@@ -135,6 +135,12 @@ pub struct Window {
     /// ignoring mouse clicks and OS-triggered focus changes for auto-align purposes.
     #[serde(default = "bool::default", rename = "keyboard-only-focus")]
     pub keyboard_only_focus: bool,
+    /// When true, unfocused windows in stack mode are sent to
+    /// the macOS desktop wallpaper layer, placing them behind
+    /// all normal applications. The focused window stays at the
+    /// normal window level. On non-macOS platforms this is ignored.
+    #[serde(default = "bool::default", rename = "wallpaper-back")]
+    pub wallpaper_back: bool,
 }
 
 fn default_peek_width() -> u32 {
@@ -177,6 +183,7 @@ impl Default for Window {
             align_height: default_align_height(),
             align_mode: AlignMode::default(),
             keyboard_only_focus: false,
+            wallpaper_back: false,
         }
     }
 }
