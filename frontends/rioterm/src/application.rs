@@ -36,10 +36,14 @@ pub struct Application<'a> {
     router: Router<'a>,
     scheduler: Scheduler,
     app_id: Option<String>,
-    /// Tracks if the next focus change was triggered by keyboard (CycleWindowNext/Prev).
-    /// When true, the next WindowEvent::Focused(true) should trigger align_windows().
-    /// This is reset after the focus event is processed.
-    keyboard_triggered_focus: bool,
+    /// Counts remaining spurious focus events to suppress after a
+    /// keyboard-triggered cycle (CycleWindowNext/Prev or
+    /// CycleStackWindowNext/Prev). On macOS, `set_outer_position()`
+    /// can trigger `WindowEvent::Focused(true)` on each repositioned
+    /// window. We set this to the number of windows being repositioned
+    /// and decrement on each focus event, suppressing re-alignment
+    /// until all spurious events have been consumed.
+    keyboard_focus_suppress_count: u32,
     /// The active alignment mode, which may differ from the config value.
     /// Updated when the user cycles windows using a specific layout
     /// (Side via CycleWindowNext/Prev, Stack via CycleStackWindowNext/Prev).
@@ -90,7 +94,7 @@ impl Application<'_> {
             router,
             scheduler,
             app_id,
-            keyboard_triggered_focus: false,
+            keyboard_focus_suppress_count: 0,
             active_align_mode,
             #[cfg(feature = "sound-effects")]
             sound_manager,
@@ -315,9 +319,10 @@ impl Application<'_> {
             None => return,
         };
 
-        // Mark this focus change as keyboard-triggered so WindowEvent::Focused
-        // won't trigger an additional align_windows() call.
-        self.keyboard_triggered_focus = true;
+        // Suppress spurious focus events from repositioning all windows.
+        // On macOS, set_outer_position() can fire Focused(true) on each
+        // window, so we suppress as many events as there are windows.
+        self.keyboard_focus_suppress_count = self.router.window_order.len() as u32;
         self.active_align_mode = rio_backend::config::window::AlignMode::Side;
 
         let window_order = self.router.window_order.clone();
@@ -360,7 +365,8 @@ impl Application<'_> {
             None => return,
         };
 
-        self.keyboard_triggered_focus = true;
+        // Suppress spurious focus events from repositioning all windows.
+        self.keyboard_focus_suppress_count = self.router.window_order.len() as u32;
         self.active_align_mode = rio_backend::config::window::AlignMode::Stack;
 
         let window_order = self.router.window_order.clone();
@@ -1659,11 +1665,12 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     // If focus was triggered by a keyboard cycle shortcut,
                     // the layout was already applied by cycle_focus() /
                     // cycle_focus_stack(). Skip re-alignment to avoid
-                    // undoing the cycle (e.g. set_outer_position() on
-                    // macOS can trigger spurious Focused events on
-                    // repositioned windows).
-                    if self.keyboard_triggered_focus {
-                        self.keyboard_triggered_focus = false;
+                    // undoing the cycle. On macOS, set_outer_position()
+                    // can trigger spurious Focused events on each
+                    // repositioned window. We suppress all of them by
+                    // counting down from the number of windows.
+                    if self.keyboard_focus_suppress_count > 0 {
+                        self.keyboard_focus_suppress_count -= 1;
                         return;
                     }
 

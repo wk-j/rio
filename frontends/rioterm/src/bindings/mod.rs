@@ -1141,10 +1141,8 @@ pub fn platform_key_bindings(
         ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
         ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
         "r", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
-        // Stack layout focus cycling: Ctrl+Shift+> and Ctrl+Shift+<
-        // key_without_modifiers() strips shift, so we match on "." and ","
-        ".", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowPrev;
-        ",", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowNext;
+        // Stack layout bindings (Ctrl+Shift+. / ,) are in the
+        // cross-platform block — do NOT duplicate them here.
     );
 
     if use_navigation_key_bindings {
@@ -1238,10 +1236,8 @@ pub fn platform_key_bindings(
         ".", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowPrev;
         ",", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleWindowNext;
         "r", ModifiersState::ALT | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::AlignWindows;
-        // Stack layout focus cycling: Ctrl+Shift+> and Ctrl+Shift+<
-        // key_without_modifiers() strips shift, so we match on "." and ","
-        ".", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowPrev;
-        ",", ModifiersState::CONTROL | ModifiersState::SHIFT, ~BindingMode::VI, ~BindingMode::SEARCH; Action::CycleStackWindowNext;
+        // Stack layout bindings (Ctrl+Shift+. / ,) are in the
+        // cross-platform block — do NOT duplicate them here.
     );
 
     if use_navigation_key_bindings {
