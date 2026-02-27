@@ -40,6 +40,12 @@ pub struct Application<'a> {
     /// When true, the next WindowEvent::Focused(true) should trigger align_windows().
     /// This is reset after the focus event is processed.
     keyboard_triggered_focus: bool,
+    /// The active alignment mode, which may differ from the config value.
+    /// Updated when the user cycles windows using a specific layout
+    /// (Side via CycleWindowNext/Prev, Stack via CycleStackWindowNext/Prev).
+    /// Used by `align_windows_with()` so that new windows, focus changes,
+    /// and manual re-align all use the last-used layout mode.
+    active_align_mode: rio_backend::config::window::AlignMode,
     #[cfg(feature = "sound-effects")]
     sound_manager: Option<crate::sound::SoundManager>,
 }
@@ -76,6 +82,8 @@ impl Application<'_> {
         #[cfg(feature = "sound-effects")]
         let sound_manager = Self::build_sound_manager(&config);
 
+        let active_align_mode = config.window.align_mode;
+
         Application {
             config,
             event_proxy,
@@ -83,6 +91,7 @@ impl Application<'_> {
             scheduler,
             app_id,
             keyboard_triggered_focus: false,
+            active_align_mode,
             #[cfg(feature = "sound-effects")]
             sound_manager,
         }
@@ -250,7 +259,7 @@ impl Application<'_> {
             None => return,
         };
 
-        match self.config.window.align_mode {
+        match self.active_align_mode {
             rio_backend::config::window::AlignMode::Side => {
                 crate::router::alignment::apply_layout(
                     &mut self.router.routes,
@@ -281,6 +290,9 @@ impl Application<'_> {
     }
 
     /// Cycle focus to the next or previous window and re-align.
+    /// Sets the active align mode to Side so that subsequent
+    /// automatic alignment (new window, focus change) uses the
+    /// same layout.
     fn cycle_window_focus(&mut self, reverse: bool) {
         let focused_id = match self
             .router
@@ -306,6 +318,7 @@ impl Application<'_> {
         // Mark this focus change as keyboard-triggered so WindowEvent::Focused
         // won't trigger an additional align_windows() call.
         self.keyboard_triggered_focus = true;
+        self.active_align_mode = rio_backend::config::window::AlignMode::Side;
 
         let window_order = self.router.window_order.clone();
         crate::router::alignment::cycle_focus(
@@ -322,7 +335,9 @@ impl Application<'_> {
 
     /// Cycle focus using the stack (front/back) layout.
     /// Called by CycleStackWindowNext / CycleStackWindowPrev.
-    /// Always uses stack layout regardless of align-mode config.
+    /// Sets the active align mode to Stack so that subsequent
+    /// automatic alignment (new window, focus change) uses the
+    /// same layout.
     fn cycle_stack_window_focus(&mut self, reverse: bool) {
         let focused_id = match self
             .router
@@ -346,6 +361,7 @@ impl Application<'_> {
         };
 
         self.keyboard_triggered_focus = true;
+        self.active_align_mode = rio_backend::config::window::AlignMode::Stack;
 
         let window_order = self.router.window_order.clone();
         crate::router::alignment::cycle_focus_stack(
@@ -629,6 +645,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 };
 
                 self.config = config;
+                self.active_align_mode = self.config.window.align_mode;
 
                 // Rebuild sound manager on config reload
                 #[cfg(feature = "sound-effects")]
@@ -1639,19 +1656,23 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 // Auto-align: must return early so the route borrow is released
                 // before we call align_windows which borrows self.router mutably.
                 if has_regained_focus && self.config.window.auto_align {
-                    // If keyboard_only_focus is enabled, only align when focus was
-                    // triggered by keyboard shortcuts (CycleWindowNext/Prev).
-                    // The keyboard_triggered_focus flag is set by cycle_window_focus()
-                    // before calling focus_window(), and cycle_focus() already handles
-                    // the layout, so we skip align_windows() for keyboard-triggered focus.
-                    if self.config.window.keyboard_only_focus {
-                        if self.keyboard_triggered_focus {
-                            // Reset the flag - layout was already applied by cycle_focus()
-                            self.keyboard_triggered_focus = false;
-                        }
-                        // Skip align_windows() for mouse/OS-triggered focus changes
+                    // If focus was triggered by a keyboard cycle shortcut,
+                    // the layout was already applied by cycle_focus() /
+                    // cycle_focus_stack(). Skip re-alignment to avoid
+                    // undoing the cycle (e.g. set_outer_position() on
+                    // macOS can trigger spurious Focused events on
+                    // repositioned windows).
+                    if self.keyboard_triggered_focus {
+                        self.keyboard_triggered_focus = false;
                         return;
                     }
+
+                    // If keyboard_only_focus is enabled, ignore
+                    // mouse/OS-triggered focus changes entirely.
+                    if self.config.window.keyboard_only_focus {
+                        return;
+                    }
+
                     // route borrow ends here due to early return
                     self.align_windows();
                     return;

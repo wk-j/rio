@@ -118,14 +118,25 @@ Identical to CR-001 — layout recalculates on:
 - Window gains focus (`WindowEvent::Focused(true)`) — unless `keyboard-only-focus` is enabled
 - New window created (`RioEvent::CreateWindow`) — new window becomes focused
 - Window closed — remaining windows redistribute
-- Config reload — re-applies layout with updated settings
+- Config reload — re-applies layout with updated settings, resets active mode to config value
 - Manual trigger (`AlignWindows` action)
-- Focus cycling — side layout (`CycleWindowNext` / `CycleWindowPrev` actions)
-- Focus cycling — stack layout (`CycleStackWindowNext` / `CycleStackWindowPrev` actions)
+- Focus cycling — side layout (`CycleWindowNext` / `CycleWindowPrev` actions) — sets active mode to Side
+- Focus cycling — stack layout (`CycleStackWindowNext` / `CycleStackWindowPrev` actions) — sets active mode to Stack
+
+### Active Align Mode Persistence
+
+The app remembers the **last-used layout mode** at runtime via an `active_align_mode` field on `Application`. This is initialized from the `align-mode` config value on startup and updated whenever the user cycles windows:
+
+- `CycleWindowNext` / `CycleWindowPrev` → sets active mode to **Side**
+- `CycleStackWindowNext` / `CycleStackWindowPrev` → sets active mode to **Stack**
+
+Subsequent automatic alignment events (new window creation, focus change, `AlignWindows` action) use the **active mode**, not the config value. This means if the user presses `Ctrl+Shift+.` to switch to stack mode, then opens a new window, the new window will be aligned using stack layout — not falling back to the config default.
+
+Config reload resets the active mode to the config value.
 
 ### Keyboard-Only Focus Mode
 
-Same behavior as CR-001: when `keyboard-only-focus = true`, mouse clicks on back-stack windows give OS focus but don't trigger layout recalculation.
+Same behavior as CR-001: when `keyboard-only-focus = true`, mouse clicks on back-row windows give OS focus but don't trigger layout recalculation.
 
 ## Implementation
 
@@ -394,104 +405,56 @@ pub fn cycle_stack_window_prev(&self) {
 
 ### 8. Application Integration — `application.rs`
 
-The existing `align_windows_with()` uses the `align-mode` config to choose which layout to apply on automatic triggers (window create/close, config reload, focus change). The new `cycle_stack_window_focus()` method always uses the stack layout regardless of config, since the keybinding explicitly requests it.
+The `Application` struct tracks the **active align mode** at runtime via an `active_align_mode` field, initialized from config and updated when the user cycles windows. `align_windows_with()` dispatches based on `self.active_align_mode` (not `self.config.window.align_mode`), so new windows and automatic alignment events use the last-selected layout mode. Config reload resets it.
 
 ```rust
+pub struct Application<'a> {
+    // ...existing fields...
+
+    /// The active alignment mode, updated by cycle shortcuts.
+    /// Used by align_windows_with() so new windows use the
+    /// last-used layout mode.
+    active_align_mode: AlignMode,
+}
+
 fn align_windows_with(
     &mut self,
     override_focused: Option<WindowId>,
 ) {
-    if self.router.window_order.len() < 2 {
-        return;
-    }
+    // ...setup omitted for brevity...
 
-    let focused_id = match override_focused
-        .or_else(|| self.router.get_focused_route())
-        .or_else(|| self.router.window_order.last().copied())
-    {
-        Some(id) => id,
-        None => return,
-    };
-
-    let screen = match self.router.routes.get(&focused_id) {
-        Some(route) => {
-            crate::router::alignment::get_available_screen_area(
-                &route.window.winit_window,
-            )
+    match self.active_align_mode {
+        AlignMode::Side => {
+            crate::router::alignment::apply_layout(...);
         }
-        None => return,
-    };
-
-    let screen = match screen {
-        Some(s) => s,
-        None => return,
-    };
-
-    match self.config.window.align_mode {
-        rio_backend::config::window::AlignMode::Side => {
-            crate::router::alignment::apply_layout(
-                &mut self.router.routes,
-                focused_id,
-                &self.router.window_order,
-                &screen,
-                self.config.window.peek_width,
-                self.config.window.align_gap,
-                self.config.window.align_width,
-            );
-        }
-        rio_backend::config::window::AlignMode::Stack => {
-            crate::router::alignment::apply_stack_layout(
-                &mut self.router.routes,
-                focused_id,
-                &self.router.window_order,
-                &screen,
-                self.config.window.align_gap,
-                self.config.window.align_width,
-            );
+        AlignMode::Stack => {
+            crate::router::alignment::apply_stack_layout(...);
         }
     }
 }
 
-/// Cycle focus using the stack (front/back) layout.
-/// Called by CycleStackWindowNext / CycleStackWindowPrev events.
-/// Always uses stack layout regardless of align-mode config.
-fn cycle_stack_window_focus(&mut self, reverse: bool) {
-    let focused_id = match self
-        .router
-        .get_focused_route()
-        .or_else(|| self.router.window_order.last().copied())
-    {
-        Some(id) => id,
-        None => return,
-    };
-
-    let screen = match self.router.routes.get(&focused_id) {
-        Some(route) => {
-            crate::router::alignment::get_available_screen_area(
-                &route.window.winit_window,
-            )
-        }
-        None => return,
-    };
-
-    let screen = match screen {
-        Some(s) => s,
-        None => return,
-    };
-
+/// Cycle using side layout. Sets active mode to Side.
+fn cycle_window_focus(&mut self, reverse: bool) {
+    // ...setup omitted...
     self.keyboard_triggered_focus = true;
-
-    let window_order = self.router.window_order.clone();
-    crate::router::alignment::cycle_focus_stack(
-        &mut self.router.routes,
-        &window_order,
-        focused_id,
-        &screen,
-        self.config.window.align_gap,
-        self.config.window.align_width,
-        reverse,
-    );
+    self.active_align_mode = AlignMode::Side;
+    // ...call cycle_focus()...
 }
+
+/// Cycle using stack layout. Sets active mode to Stack.
+fn cycle_stack_window_focus(&mut self, reverse: bool) {
+    // ...setup omitted...
+    self.keyboard_triggered_focus = true;
+    self.active_align_mode = AlignMode::Stack;
+    // ...call cycle_focus_stack()...
+}
+```
+
+On config reload, reset to config value:
+
+```rust
+self.config = config;
+self.active_align_mode = self.config.window.align_mode;
 ```
 
 Event dispatch in `user_event()`:
