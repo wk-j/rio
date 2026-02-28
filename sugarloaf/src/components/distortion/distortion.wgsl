@@ -2,6 +2,9 @@ struct DistortionParams {
     distortion_type: u32,
     strength: f32,
     center: vec2<f32>,
+    time: f32,
+    speed: f32,
+    _padding: vec2<f32>,
 }
 
 struct VertexOutput {
@@ -64,22 +67,67 @@ fn perspective_distort(
     );
 }
 
+/// Sinusoidal wave distortion (animated).
+fn wave_distort(
+    uv: vec2<f32>,
+    k: f32,
+    time: f32,
+    speed: f32,
+) -> vec2<f32> {
+    let t = time * speed;
+    let wave_x = sin(uv.y * 10.0 + t * 3.0) * k * 0.02;
+    let wave_y = cos(uv.x * 10.0 + t * 2.0) * k * 0.02;
+    return uv + vec2<f32>(wave_x, wave_y);
+}
+
+/// Fisheye lens distortion.
+fn fisheye_distort(
+    uv: vec2<f32>,
+    center: vec2<f32>,
+    k: f32,
+) -> vec2<f32> {
+    let d = uv - center;
+    let r = length(d);
+    let theta = atan2(d.y, d.x);
+    let mapped_r = pow(r, 1.0 + k) / pow(0.5, k);
+    return center + vec2<f32>(
+        cos(theta) * mapped_r,
+        sin(theta) * mapped_r,
+    );
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var uv = input.tex_coords;
 
-    // 1 = barrel, 2 = perspective
-    if params.distortion_type == 1u {
-        uv = barrel_distort(
-            uv, params.center, params.strength,
-        );
-    } else if params.distortion_type == 2u {
-        uv = perspective_distort(
-            uv, params.center, params.strength,
-        );
+    // 1 = barrel, 2 = perspective, 3 = wave, 4 = fisheye
+    switch params.distortion_type {
+        case 1u: {
+            uv = barrel_distort(
+                uv, params.center, params.strength,
+            );
+        }
+        case 2u: {
+            uv = perspective_distort(
+                uv, params.center, params.strength,
+            );
+        }
+        case 3u: {
+            uv = wave_distort(
+                uv, params.strength, params.time,
+                params.speed,
+            );
+        }
+        case 4u: {
+            uv = fisheye_distort(
+                uv, params.center, params.strength,
+            );
+        }
+        default: {}
     }
 
-    // Out-of-bounds samples return black
+    // Clamp to valid UV range; out-of-bounds samples
+    // return black (transparent)
     if uv.x < 0.0 || uv.x > 1.0
         || uv.y < 0.0 || uv.y > 1.0
     {

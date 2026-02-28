@@ -10,6 +10,10 @@ pub enum DistortionType {
     Barrel,
     /// Perspective tilt (vanishing point effect)
     Perspective,
+    /// Sinusoidal wave distortion (animated)
+    Wave,
+    /// Fisheye lens effect
+    Fisheye,
 }
 
 /// Configuration for the `[distortion]` TOML section.
@@ -19,6 +23,8 @@ pub enum DistortionType {
 /// effect = "barrel"
 /// strength = 0.3
 /// center = [0.5, 0.5]
+/// animated = false
+/// speed = 1.0
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -36,6 +42,15 @@ pub struct DistortionConfig {
     /// (0.0–1.0). Default: [0.5, 0.5] (screen center).
     #[serde(default = "default_center")]
     pub center: [f32; 2],
+
+    /// Enable time-based animation. Only meaningful for
+    /// wave effect. Default: false
+    #[serde(default)]
+    pub animated: bool,
+
+    /// Animation speed multiplier. Default: 1.0
+    #[serde(default = "default_speed")]
+    pub speed: f32,
 }
 
 fn default_strength() -> f32 {
@@ -46,12 +61,18 @@ fn default_center() -> [f32; 2] {
     [0.5, 0.5]
 }
 
+fn default_speed() -> f32 {
+    1.0
+}
+
 impl Default for DistortionConfig {
     fn default() -> Self {
         Self {
             effect: DistortionType::None,
             strength: default_strength(),
             center: default_center(),
+            animated: false,
+            speed: default_speed(),
         }
     }
 }
@@ -66,6 +87,8 @@ mod tests {
         assert_eq!(config.effect, DistortionType::None);
         assert_eq!(config.strength, 0.3);
         assert_eq!(config.center, [0.5, 0.5]);
+        assert!(!config.animated);
+        assert_eq!(config.speed, 1.0);
     }
 
     #[test]
@@ -108,5 +131,35 @@ mod tests {
         let toml_str = "";
         let config: DistortionConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.effect, DistortionType::None);
+    }
+
+    #[test]
+    fn test_distortion_wave_toml() {
+        let toml_str = r#"
+            effect = "wave"
+            strength = 0.2
+            animated = true
+            speed = 0.5
+        "#;
+        let config: DistortionConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.effect, DistortionType::Wave);
+        assert_eq!(config.strength, 0.2);
+        assert!(config.animated);
+        assert_eq!(config.speed, 0.5);
+        assert_eq!(config.center, [0.5, 0.5]);
+    }
+
+    #[test]
+    fn test_distortion_fisheye_toml() {
+        let toml_str = r#"
+            effect = "fisheye"
+            strength = 0.5
+            center = [0.5, 0.5]
+        "#;
+        let config: DistortionConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.effect, DistortionType::Fisheye);
+        assert_eq!(config.strength, 0.5);
+        assert!(!config.animated);
+        assert_eq!(config.speed, 1.0);
     }
 }

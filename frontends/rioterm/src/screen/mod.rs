@@ -48,8 +48,8 @@ use rio_backend::crosswords::search::RegexSearch;
 use rio_backend::event::{ClickState, EventProxy, SearchState};
 use rio_backend::sugarloaf::{
     layout::RootStyle, DistortionParams, Sugarloaf, SugarloafErrors, SugarloafRenderer,
-    SugarloafWindow, SugarloafWindowSize, DISTORTION_BARREL, DISTORTION_NONE,
-    DISTORTION_PERSPECTIVE,
+    SugarloafWindow, SugarloafWindowSize, DISTORTION_BARREL, DISTORTION_FISHEYE,
+    DISTORTION_NONE, DISTORTION_PERSPECTIVE, DISTORTION_WAVE,
 };
 use rio_window::event::ElementState;
 use rio_window::event::Modifiers;
@@ -86,11 +86,26 @@ fn distortion_params_from_config(
         DistortionType::None => DISTORTION_NONE,
         DistortionType::Barrel => DISTORTION_BARREL,
         DistortionType::Perspective => DISTORTION_PERSPECTIVE,
+        DistortionType::Wave => DISTORTION_WAVE,
+        DistortionType::Fisheye => DISTORTION_FISHEYE,
     };
+
+    let time = if config.distortion.animated {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f32()
+    } else {
+        0.0
+    };
+
     DistortionParams {
         distortion_type,
         strength: config.distortion.strength,
         center: config.distortion.center,
+        time,
+        speed: config.distortion.speed,
+        _padding: [0.0; 2],
     }
 }
 

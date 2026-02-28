@@ -20,7 +20,8 @@ pub use crate::sugarloaf::{
     SugarloafWindowSize, SugarloafWithErrors,
 };
 pub use components::distortion::{
-    DistortionParams, DISTORTION_BARREL, DISTORTION_NONE, DISTORTION_PERSPECTIVE,
+    DistortionParams, DISTORTION_BARREL, DISTORTION_FISHEYE, DISTORTION_NONE,
+    DISTORTION_PERSPECTIVE, DISTORTION_WAVE,
 };
 pub use components::filters::Filter;
 pub use components::quad::Quad;

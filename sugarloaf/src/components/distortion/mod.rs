@@ -6,17 +6,24 @@ use std::mem;
 pub const DISTORTION_NONE: u32 = 0;
 pub const DISTORTION_BARREL: u32 = 1;
 pub const DISTORTION_PERSPECTIVE: u32 = 2;
+pub const DISTORTION_WAVE: u32 = 3;
+pub const DISTORTION_FISHEYE: u32 = 4;
 
 /// GPU-side distortion parameters. Uploaded as a uniform buffer.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
 pub struct DistortionParams {
-    /// 0=none, 1=barrel, 2=perspective
+    /// 0=none, 1=barrel, 2=perspective, 3=wave, 4=fisheye
     pub distortion_type: u32,
     /// Effect magnitude (can be negative for inverse)
     pub strength: f32,
     /// Normalized center point [x, y]
     pub center: [f32; 2],
+    /// Elapsed time in seconds (for animated effects)
+    pub time: f32,
+    /// Animation speed multiplier
+    pub speed: f32,
+    pub _padding: [f32; 2],
 }
 
 /// Post-processing brush that applies distortion effects to the
@@ -90,6 +97,9 @@ impl DistortionBrush {
             distortion_type: DISTORTION_NONE,
             strength: 0.0,
             center: [0.5, 0.5],
+            time: 0.0,
+            speed: 1.0,
+            _padding: [0.0; 2],
         };
 
         let params_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
