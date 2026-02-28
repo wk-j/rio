@@ -1840,4 +1840,70 @@ mod tests {
         assert_eq!(result.shell.args, vec!["--login"]);
         assert_eq!(result.editor.program, "hx");
     }
+
+    #[test]
+    fn test_window_border_glow_default() {
+        let result = create_temporary_config(
+            "window-border-glow-default",
+            r#"
+            [window]
+            width = 800
+        "#,
+        );
+
+        assert!(!result.window.border_glow.enabled);
+        assert_eq!(result.window.border_glow.color, "#8B5CF6");
+        assert_eq!(result.window.border_glow.width, 2.0);
+        assert_eq!(result.window.border_glow.glow_radius, 8.0);
+        assert_eq!(result.window.border_glow.glow_intensity, 0.6);
+        assert_eq!(
+            result.window.border_glow.animate,
+            window::BorderGlowAnimate::None
+        );
+        assert_eq!(result.window.border_glow.animate_speed, 1.0);
+    }
+
+    #[test]
+    fn test_window_border_glow_enabled() {
+        let result = create_temporary_config(
+            "window-border-glow-enabled",
+            "[window.border-glow]\n\
+             enabled = true\n\
+             color = '#00BFFF'\n\
+             width = 3.0\n\
+             glow-radius = 12.0\n\
+             glow-intensity = 0.8\n\
+             animate = 'pulse'\n\
+             animate-speed = 2.0\n",
+        );
+
+        assert!(result.window.border_glow.enabled);
+        assert_eq!(result.window.border_glow.color, "#00BFFF");
+        assert_eq!(result.window.border_glow.width, 3.0);
+        assert_eq!(result.window.border_glow.glow_radius, 12.0);
+        assert_eq!(result.window.border_glow.glow_intensity, 0.8);
+        assert_eq!(
+            result.window.border_glow.animate,
+            window::BorderGlowAnimate::Pulse
+        );
+        assert_eq!(result.window.border_glow.animate_speed, 2.0);
+    }
+
+    #[test]
+    fn test_window_border_glow_rainbow() {
+        let result = create_temporary_config(
+            "window-border-glow-rainbow",
+            r#"
+            [window.border-glow]
+            enabled = true
+            animate = "rainbow"
+        "#,
+        );
+
+        assert!(result.window.border_glow.enabled);
+        assert_eq!(
+            result.window.border_glow.animate,
+            window::BorderGlowAnimate::Rainbow
+        );
+    }
 }

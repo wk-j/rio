@@ -26,6 +26,8 @@ pub struct SugarState {
     /// Cursor glow overlay layers (rendered behind/around the cursor cell).
     /// Multiple concentric quads create a bloom effect.
     pub cursor_glow_layers: Vec<Quad>,
+    /// Window border glow overlay (Opera GX style glowing edges).
+    pub window_border_glow: Vec<Quad>,
 }
 
 impl SugarState {
@@ -50,6 +52,7 @@ impl SugarState {
             vi_mode_overlay: None,
             progress_bar: None,
             cursor_glow_layers: vec![],
+            window_border_glow: vec![],
         }
     }
 
@@ -312,5 +315,10 @@ impl SugarState {
     #[inline]
     pub fn set_cursor_glow_layers(&mut self, layers: Vec<Quad>) {
         self.cursor_glow_layers = layers;
+    }
+
+    #[inline]
+    pub fn set_window_border_glow(&mut self, quads: Vec<Quad>) {
+        self.window_border_glow = quads;
     }
 }

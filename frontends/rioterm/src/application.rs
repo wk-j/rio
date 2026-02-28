@@ -1894,9 +1894,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         &mut self.scheduler,
                         route.window.screen.ctx().current_route(),
                     );
-                } else if route.window.screen.renderer.trail_animating {
-                    // Cursor trail is fading out — schedule
-                    // next frame to continue the animation.
+                } else if route.window.screen.renderer.trail_animating
+                    || route.window.screen.renderer.border_glow_animating
+                {
+                    // Cursor trail is fading out or border glow is
+                    // animating — schedule next frame to continue.
                     route.schedule_redraw(
                         &mut self.scheduler,
                         route.window.screen.ctx().current_route(),

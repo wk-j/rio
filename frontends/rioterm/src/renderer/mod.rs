@@ -108,6 +108,13 @@ pub struct Renderer {
     /// Set to true during `run()` when trail entries are still
     /// fading out and the window needs continuous redraws.
     pub trail_animating: bool,
+    // Window border glow config
+    border_glow_config: rio_backend::config::window::BorderGlow,
+    /// Monotonic start time for border glow animations.
+    border_glow_start: std::time::Instant,
+    /// Set to true during `run()` when border glow animation is
+    /// active and the window needs continuous redraws.
+    pub border_glow_animating: bool,
 }
 
 /// Resolve the glow color from config. Returns `None` when
@@ -129,6 +136,88 @@ fn resolve_glow_color(
             Some([arr[0], arr[1], arr[2]])
         }
     }
+}
+
+/// Convert HSL (hue 0-360, saturation 0-1, lightness 0-1) to RGB [0-1].
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let h_prime = h / 60.0;
+    let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = match h_prime as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    [r1 + m, g1 + m, b1 + m]
+}
+
+/// Compute the window border glow overlay quads.
+fn compute_border_glow(
+    config: &rio_backend::config::window::BorderGlow,
+    window_width: f32,
+    window_height: f32,
+    elapsed: f32,
+) -> Vec<Quad> {
+    use rio_backend::config::window::BorderGlowAnimate;
+
+    if !config.enabled {
+        return Vec::new();
+    }
+
+    let color_rgb = {
+        let arr = rio_backend::config::colors::hex_to_color_arr(&config.color);
+        [arr[0], arr[1], arr[2]]
+    };
+
+    let alpha = match config.animate {
+        BorderGlowAnimate::None => config.glow_intensity,
+        BorderGlowAnimate::Pulse => {
+            let t = (elapsed * config.animate_speed * 2.0 * std::f32::consts::PI).sin();
+            let base = config.glow_intensity;
+            base * 0.5 + base * 0.5 * t
+        }
+        BorderGlowAnimate::Rainbow => config.glow_intensity,
+    };
+
+    let color = match config.animate {
+        BorderGlowAnimate::Rainbow => {
+            hsl_to_rgb((elapsed * config.animate_speed * 60.0) % 360.0, 0.8, 0.6)
+        }
+        _ => color_rgb,
+    };
+
+    let w = config.width;
+    let blur = config.glow_radius;
+    let shadow_color = [color[0], color[1], color[2], alpha];
+
+    let make_edge = |pos: [f32; 2], size: [f32; 2]| -> Quad {
+        Quad {
+            position: pos,
+            size,
+            color: [color[0], color[1], color[2], alpha * 0.8],
+            border_radius: [0.0; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_color,
+            shadow_offset: [0.0, 0.0],
+            shadow_blur_radius: blur,
+        }
+    };
+
+    vec![
+        // Top edge
+        make_edge([0.0, 0.0], [window_width, w]),
+        // Bottom edge
+        make_edge([0.0, window_height - w], [window_width, w]),
+        // Left edge (inset to avoid corner double-brightness)
+        make_edge([0.0, w], [w, window_height - 2.0 * w]),
+        // Right edge (inset to avoid corner double-brightness)
+        make_edge([window_width - w, w], [w, window_height - 2.0 * w]),
+    ]
 }
 
 impl Renderer {
@@ -224,6 +313,9 @@ impl Renderer {
             trail_last_pos: None,
             trail_entries: VecDeque::new(),
             trail_animating: false,
+            border_glow_config: config.window.border_glow.clone(),
+            border_glow_start: std::time::Instant::now(),
+            border_glow_animating: false,
         };
 
         // Pre-populate font cache with common characters for better performance
@@ -1699,6 +1791,21 @@ impl Renderer {
             }
         };
         sugarloaf.set_cursor_glow_layers(cursor_glow_layers);
+
+        // Compute window border glow overlay
+        {
+            let elapsed = self.border_glow_start.elapsed().as_secs_f32();
+            let border_glow_quads = compute_border_glow(
+                &self.border_glow_config,
+                window_size.width,
+                window_size.height,
+                elapsed,
+            );
+            self.border_glow_animating = self.border_glow_config.enabled
+                && self.border_glow_config.animate
+                    != rio_backend::config::window::BorderGlowAnimate::None;
+            sugarloaf.set_window_border_glow(border_glow_quads);
+        }
 
         // Set progress bar from active terminal's progress state
         let progress_bar = {

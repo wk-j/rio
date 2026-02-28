@@ -2,6 +2,68 @@ use crate::config::defaults::*;
 use serde::{Deserialize, Serialize};
 use sugarloaf::ImageProperties;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BorderGlowAnimate {
+    #[default]
+    None,
+    Pulse,
+    Rainbow,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BorderGlow {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_border_glow_color")]
+    pub color: String,
+    #[serde(default = "default_border_glow_width")]
+    pub width: f32,
+    #[serde(default = "default_border_glow_radius")]
+    pub glow_radius: f32,
+    #[serde(default = "default_border_glow_intensity")]
+    pub glow_intensity: f32,
+    #[serde(default)]
+    pub animate: BorderGlowAnimate,
+    #[serde(default = "default_border_glow_animate_speed")]
+    pub animate_speed: f32,
+}
+
+fn default_border_glow_color() -> String {
+    String::from("#8B5CF6")
+}
+
+fn default_border_glow_width() -> f32 {
+    2.0
+}
+
+fn default_border_glow_radius() -> f32 {
+    8.0
+}
+
+fn default_border_glow_intensity() -> f32 {
+    0.6
+}
+
+fn default_border_glow_animate_speed() -> f32 {
+    1.0
+}
+
+impl Default for BorderGlow {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            color: default_border_glow_color(),
+            width: default_border_glow_width(),
+            glow_radius: default_border_glow_radius(),
+            glow_intensity: default_border_glow_intensity(),
+            animate: BorderGlowAnimate::default(),
+            animate_speed: default_border_glow_animate_speed(),
+        }
+    }
+}
+
 #[derive(Default, Clone, Serialize, Deserialize, Copy, Debug, PartialEq)]
 pub enum WindowMode {
     #[serde(alias = "maximized")]
@@ -141,6 +203,9 @@ pub struct Window {
     /// normal window level. On non-macOS platforms this is ignored.
     #[serde(default = "bool::default", rename = "wallpaper-back")]
     pub wallpaper_back: bool,
+    /// Glowing border effect around the window edges (Opera GX style).
+    #[serde(default = "BorderGlow::default", rename = "border-glow")]
+    pub border_glow: BorderGlow,
 }
 
 fn default_peek_width() -> u32 {
@@ -184,6 +249,7 @@ impl Default for Window {
             align_mode: AlignMode::default(),
             keyboard_only_focus: false,
             wallpaper_back: false,
+            border_glow: BorderGlow::default(),
         }
     }
 }
