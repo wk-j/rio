@@ -193,12 +193,13 @@ fn compute_border_glow(
     let w = config.width;
     let blur = config.glow_radius;
     let shadow_color = [color[0], color[1], color[2], alpha];
+    let fill_color = [color[0], color[1], color[2], alpha * 0.8];
 
     let make_edge = |pos: [f32; 2], size: [f32; 2]| -> Quad {
         Quad {
             position: pos,
             size,
-            color: [color[0], color[1], color[2], alpha * 0.8],
+            color: fill_color,
             border_radius: [0.0; 4],
             border_color: [0.0; 4],
             border_width: 0.0,
@@ -208,16 +209,64 @@ fn compute_border_glow(
         }
     };
 
-    vec![
-        // Top edge
-        make_edge([0.0, 0.0], [window_width, w]),
-        // Bottom edge
-        make_edge([0.0, window_height - w], [window_width, w]),
-        // Left edge (inset to avoid corner double-brightness)
-        make_edge([0.0, w], [w, window_height - 2.0 * w]),
-        // Right edge (inset to avoid corner double-brightness)
-        make_edge([window_width - w, w], [w, window_height - 2.0 * w]),
-    ]
+    // Chamfer: the diagonal cut at each corner. Edges stop short
+    // and a staircase of tiny quads draws the 45-degree line.
+    let chamfer = 15.0_f32.min(window_width * 0.03);
+
+    let mut quads = Vec::with_capacity(20);
+
+    // ── Straight edges (inset by chamfer at each end) ──
+    quads.push(make_edge([chamfer, 0.0], [window_width - 2.0 * chamfer, w]));
+    quads.push(make_edge(
+        [chamfer, window_height - w],
+        [window_width - 2.0 * chamfer, w],
+    ));
+    quads.push(make_edge(
+        [0.0, chamfer],
+        [w, window_height - 2.0 * chamfer],
+    ));
+    quads.push(make_edge(
+        [window_width - w, chamfer],
+        [w, window_height - 2.0 * chamfer],
+    ));
+
+    // ── Corner diagonals ──
+    // Draw the 45-degree chamfer line as a staircase of small
+    // square quads (w x w), each stepping one pixel diagonally.
+    // These use the same glow as the edges for consistency.
+    let steps = (chamfer / w).round().max(1.0) as usize;
+    let sx = chamfer / steps as f32;
+    let sy = chamfer / steps as f32;
+
+    for i in 0..steps {
+        let t = i as f32;
+
+        // Top-left: from (chamfer, 0) going toward (0, chamfer)
+        quads.push(make_edge([chamfer - (t + 1.0) * sx, t * sy], [sx, sy]));
+
+        // Top-right: from (W - chamfer, 0) toward (W, chamfer)
+        quads.push(make_edge(
+            [window_width - chamfer + t * sx, t * sy],
+            [sx, sy],
+        ));
+
+        // Bottom-left: from (chamfer, H) toward (0, H - chamfer)
+        quads.push(make_edge(
+            [chamfer - (t + 1.0) * sx, window_height - (t + 1.0) * sy],
+            [sx, sy],
+        ));
+
+        // Bottom-right: from (W - chamfer, H) toward (W, H - chamfer)
+        quads.push(make_edge(
+            [
+                window_width - chamfer + t * sx,
+                window_height - (t + 1.0) * sy,
+            ],
+            [sx, sy],
+        ));
+    }
+
+    quads
 }
 
 impl Renderer {
