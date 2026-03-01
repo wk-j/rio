@@ -241,7 +241,7 @@ impl Application<'_> {
         // Skip alignment for 0 or 1 window — unless wallpaper-back
         // stack mode is active, where the single remaining window may
         // need to be resized from back-row to focused size.
-        let wallpaper_stack = self.config.window.wallpaper_back
+        let wallpaper_stack = self.config.window.stack_align.wallpaper_back
             && matches!(
                 self.active_align_mode,
                 rio_backend::config::window::AlignMode::Stack
@@ -272,26 +272,28 @@ impl Application<'_> {
 
         match self.active_align_mode {
             rio_backend::config::window::AlignMode::Side => {
+                let sa = &self.config.window.side_align;
                 crate::router::alignment::apply_layout(
                     &mut self.router.routes,
                     focused_id,
                     &self.router.window_order,
                     &screen,
-                    self.config.window.peek_width,
-                    self.config.window.align_gap,
-                    self.config.window.align_width,
+                    sa.peek_width,
+                    sa.gap,
+                    sa.width,
                 );
             }
             rio_backend::config::window::AlignMode::Stack => {
+                let sa = &self.config.window.stack_align;
                 crate::router::alignment::apply_stack_layout(
                     &mut self.router.routes,
                     focused_id,
                     &self.router.window_order,
                     &screen,
-                    self.config.window.align_gap,
-                    self.config.window.align_width,
-                    self.config.window.align_height,
-                    self.config.window.wallpaper_back,
+                    sa.gap,
+                    sa.width,
+                    sa.height,
+                    sa.wallpaper_back,
                 );
             }
         }
@@ -308,7 +310,7 @@ impl Application<'_> {
     /// this, the last remaining window(s) would be stuck behind all
     /// applications with no way to interact.
     fn restore_focus_after_close(&mut self) {
-        if !self.config.window.wallpaper_back {
+        if !self.config.window.stack_align.wallpaper_back {
             return;
         }
         if !matches!(
@@ -370,14 +372,15 @@ impl Application<'_> {
         self.active_align_mode = rio_backend::config::window::AlignMode::Side;
 
         let window_order = self.router.window_order.clone();
+        let sa = &self.config.window.side_align;
         crate::router::alignment::cycle_focus(
             &mut self.router.routes,
             &window_order,
             focused_id,
             &screen,
-            self.config.window.peek_width,
-            self.config.window.align_gap,
-            self.config.window.align_width,
+            sa.peek_width,
+            sa.gap,
+            sa.width,
             reverse,
         );
     }
@@ -414,15 +417,16 @@ impl Application<'_> {
         self.active_align_mode = rio_backend::config::window::AlignMode::Stack;
 
         let window_order = self.router.window_order.clone();
+        let sa = &self.config.window.stack_align;
         crate::router::alignment::cycle_focus_stack(
             &mut self.router.routes,
             &window_order,
             focused_id,
             &screen,
-            self.config.window.align_gap,
-            self.config.window.align_width,
-            self.config.window.align_height,
-            self.config.window.wallpaper_back,
+            sa.gap,
+            sa.width,
+            sa.height,
+            sa.wallpaper_back,
             reverse,
         );
     }
@@ -1750,7 +1754,15 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
                     // If keyboard_only_focus is enabled, ignore
                     // mouse/OS-triggered focus changes entirely.
-                    if self.config.window.keyboard_only_focus {
+                    let kbd_only = match self.active_align_mode {
+                        rio_backend::config::window::AlignMode::Side => {
+                            self.config.window.side_align.keyboard_only_focus
+                        }
+                        rio_backend::config::window::AlignMode::Stack => {
+                            self.config.window.stack_align.keyboard_only_focus
+                        }
+                    };
+                    if kbd_only {
                         return;
                     }
 

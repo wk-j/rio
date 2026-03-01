@@ -1,4 +1,4 @@
-# CR-001: Auto Window Alignment (Focus-Centered Tiling)
+# CR-001: Side Window Alignment (Focus-Centered Tiling)
 
 **Status:** Implemented
 **Date:** 2026-02-14
@@ -6,7 +6,7 @@
 
 ## Summary
 
-Automatically arrange Rio terminal windows in a focus-centered layout. The **focused window occupies the left portion** of the screen at a configurable width ratio (`align-width`). **Unfocused windows are stacked vertically on the right side**, sharing the remaining screen space. Cycling focus rotates which window sits on the left — others restack on the right. This gives a clean primary-window experience with secondary windows always visible, no external window manager needed.
+Automatically arrange Rio terminal windows in a side-by-side layout. The **focused window occupies the left portion** of the screen at a configurable width ratio (`width` in `[window.side-align]`). **Unfocused windows are stacked vertically on the right side**, sharing the remaining screen space. Cycling focus rotates which window sits on the left — others restack on the right. This gives a clean primary-window experience with secondary windows always visible, no external window manager needed.
 
 ## Motivation
 
@@ -84,11 +84,13 @@ left: A (80%)  right stack: [B, C]
 
 ### Keybindings
 
-| Action | macOS | Linux/Windows | Config string |
+| Action | All platforms | macOS/Windows additional | Config string |
 |---|---|---|---|
-| Cycle to next window | `Cmd+Shift+.` | `Alt+Shift+.` | `"cyclewindownext"` |
-| Cycle to previous window | `Cmd+Shift+,` | `Alt+Shift+,` | `"cyclewindowprev"` |
-| Re-align all windows | `Cmd+Shift+R` | `Alt+Shift+R` | `"alignwindows"` |
+| Cycle to next window | `Super+Shift+.` | `Alt+Shift+.` | `"cyclewindownext"` |
+| Cycle to previous window | `Super+Shift+,` | `Alt+Shift+,` | `"cyclewindowprev"` |
+| Re-align all windows | `Super+Shift+R` | `Alt+Shift+R` | `"alignwindows"` |
+
+The `Super+Shift` bindings are in the cross-platform default block and work on all platforms. macOS and Windows additionally register `Alt+Shift` variants in their platform-specific blocks. On macOS, `Super` = `Cmd`.
 
 **Note:** Keybindings use base characters `.` and `,` (not `>` and `<`) because `key_without_modifiers()` strips the Shift modifier. The user presses `Cmd+Shift+>` but the key is matched as `Cmd+Shift+.`.
 
@@ -135,6 +137,7 @@ pub fn focused_slot(
     gap: u32,
     align_width: f32,
     has_peers: bool,
+    decoration_height: u32,
 ) -> WindowSlot;
 
 /// Apply layout: focused left, unfocused stacked right.
@@ -197,20 +200,28 @@ String mappings: `"cyclewindownext"`, `"cyclewindowprev"`, `"alignwindows"`.
 
 Core methods on `impl Application<'_>` (not the `ApplicationHandler` trait impl):
 
-- `align_windows_with(override_focused: Option<WindowId>)` — main layout method; reads config, gets screen area, calls `apply_layout()`
+- `align_windows_with(override_focused: Option<WindowId>)` — main layout method; reads config from `self.config.window.side_align`, gets screen area, calls `apply_layout()`
 - `align_windows()` — convenience wrapper calling `align_windows_with(None)`
 - `cycle_window_focus(reverse: bool)` — finds focused window, calls `cycle_focus()`
 
 Guard: all methods early-return if `auto_align` is false in config.
 
+**Spurious focus suppression:** On macOS, `set_outer_position()` can trigger `WindowEvent::Focused(true)` on each repositioned window. The `keyboard_focus_suppress_count: u32` field on `Application` is set to the number of windows being repositioned before a keyboard-triggered cycle. Each spurious focus event decrements the counter and skips re-alignment until all spurious events are consumed.
+
 ### 6. Configuration — `rio-backend/src/config/window.rs`
+
+Side alignment has its own configuration section, separate from the
+stack alignment (CR-014):
 
 ```toml
 [window]
 auto-align = true          # bool, default false — enables the feature
+align-mode = "side"        # "side" (default) or "stack" — selects the active layout
+
+[window.side-align]
+width = 0.8                # f32, default 1.0 — focused window width as ratio of screen (0.1–1.0)
+gap = 20                   # u32, default 10 — pixels between windows
 peek-width = 50            # u32, default 50 — reserved for future use
-align-gap = 20             # u32, default 10 — pixels between windows
-align-width = 0.8          # f32, default 1.0 — focused window width as ratio of screen (0.1–1.0)
 keyboard-only-focus = true # bool, default false — only change layout via keyboard shortcuts, ignore mouse clicks
 ```
 
@@ -260,10 +271,11 @@ Single window:
 2. Hooked into `WindowEvent::Focused(true)` to trigger layout on focus change
 3. Hooked into `create_window()` and window close for layout recalculation
 4. Added `AlignWindows`, `CycleWindowNext`, `CycleWindowPrev` keybindings
-5. Added config options (`auto-align`, `align-gap`, `align-width`)
+5. Added config options (`auto-align`, `[window.side-align]` with `width`, `gap`, `peek-width`, `keyboard-only-focus`)
 6. Fixed macOS screen detection (CGDisplay instead of NSScreen)
 7. Fixed logical vs physical coordinate handling for Retina displays
 8. Switched from left/right peek to right-side stack layout
+9. Added `keyboard_focus_suppress_count` to prevent spurious focus events from triggering re-alignment after keyboard-initiated cycles
 
 ## Dependencies
 

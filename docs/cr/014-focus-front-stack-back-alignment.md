@@ -1,12 +1,12 @@
 # CR-014: Focus Front / Stack Back Window Alignment
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-02-27
 **Author:** wk
 
 ## Summary
 
-A second window alignment mode for Rio terminal: **Focus Front / Stack Back**. The focused window is brought to the **frontmost layer at full (or near-full) screen size**, while all unfocused windows are **arranged left-to-right behind it, equally filling the entire desktop space**. Cycling focus promotes a different window to the front and rearranges the others behind it. This gives a "stage manager" experience — one window dominates the screen, others are tiled behind it for quick switching. In stack mode, the focused window height is independently configurable via `align-height`.
+A second window alignment mode for Rio terminal: **Focus Front / Stack Back**. The focused window is brought to the **frontmost layer at full (or near-full) screen size**, while all unfocused windows are **arranged left-to-right behind it, equally filling the entire desktop space**. Cycling focus promotes a different window to the front and rearranges the others behind it. This gives a "stage manager" experience — one window dominates the screen, others are tiled behind it for quick switching. In stack mode, the focused window height is independently configurable via `height` in `[window.stack-align]`.
 
 Optionally, unfocused windows can be sent to the **desktop wallpaper layer** (`wallpaper-back = true`), placing them behind all other applications — effectively turning them into live terminal wallpapers. When focus cycles, the newly focused window is promoted from the wallpaper layer back to the normal window level, and the previously focused window is demoted to the wallpaper layer. This is inspired by macOS apps that render content at the `kCGDesktopWindowLevel` (see [wallpaper-play](https://github.com/wk-j/wallpaper-play/issues/6)).
 
@@ -108,11 +108,11 @@ New dedicated keybindings for the stack layout, **additional** to the existing C
 
 Existing CR-001 bindings remain unchanged:
 
-| Action | macOS | Linux/Windows | Config string |
+| Action | All platforms | macOS/Windows additional | Config string |
 |---|---|---|---|
-| Cycle to next window (side layout) | `Cmd+Shift+.` | `Alt+Shift+.` | `"cyclewindownext"` |
-| Cycle to previous window (side layout) | `Cmd+Shift+,` | `Alt+Shift+,` | `"cyclewindowprev"` |
-| Re-align all windows | `Cmd+Shift+R` | `Alt+Shift+R` | `"alignwindows"` |
+| Cycle to next window (side layout) | `Super+Shift+.` | `Alt+Shift+.` | `"cyclewindownext"` |
+| Cycle to previous window (side layout) | `Super+Shift+,` | `Alt+Shift+,` | `"cyclewindowprev"` |
+| Re-align all windows | `Super+Shift+R` | `Alt+Shift+R` | `"alignwindows"` |
 
 **Note:** `Ctrl+Shift+>` is matched as `Ctrl+Shift+.` because `key_without_modifiers()` strips the Shift modifier. The user presses `Ctrl+Shift+>` but the key is matched as `.` with `CONTROL | SHIFT` modifiers.
 
@@ -146,7 +146,9 @@ Same behavior as CR-001: when `keyboard-only-focus = true`, mouse clicks on back
 
 ### 1. Configuration — `rio-backend/src/config/window.rs`
 
-Add a new `align-mode` option:
+Stack alignment has its own configuration section, fully separate from
+the side alignment (CR-001). The `AlignMode` enum selects the default
+active layout:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -165,36 +167,23 @@ impl Default for AlignMode {
 }
 ```
 
-New fields on the `Window` struct:
+Stack-specific configuration lives in the `StackAlign` struct:
 
 ```rust
-#[serde(default = "AlignMode::default", rename = "align-mode")]
-pub align_mode: AlignMode,
-
-/// Focused window height as a ratio of available screen height
-/// (0.1–1.0). Only affects the focused window in stack layout.
-/// Side layout and unfocused windows always use full screen height.
-/// Default: 1.0 (full height).
-#[serde(default = "default_align_height", rename = "align-height")]
-pub align_height: f32,
-```
-
-```rust
-/// When true, unfocused windows in stack mode are sent to the
-/// macOS desktop wallpaper layer (kCGDesktopWindowLevel + 1),
-/// placing them behind all normal applications. The focused
-/// window stays at the normal window level. On non-macOS
-/// platforms this option is ignored.
-/// Default: false.
-#[serde(default = "bool::default", rename = "wallpaper-back")]
-pub wallpaper_back: bool,
-```
-
-With defaults:
-
-```rust
-fn default_align_height() -> f32 {
-    1.0
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
+/// Configuration for the stack alignment layout (CR-014).
+pub struct StackAlign {
+    /// Focused window width as a ratio of screen (0.1–1.0).
+    pub width: f32,           // default 1.0
+    /// Focused window height as a ratio of screen (0.1–1.0).
+    pub height: f32,          // default 1.0
+    /// Pixels of margin between windows.
+    pub gap: u32,             // default 10
+    /// When true, layout only changes via keyboard shortcuts.
+    pub keyboard_only_focus: bool,  // default false
+    /// When true, unfocused windows are sent to the macOS
+    /// desktop wallpaper layer (kCGDesktopWindowLevel + 1).
+    pub wallpaper_back: bool,       // default false
 }
 ```
 
@@ -204,11 +193,23 @@ Full TOML example:
 [window]
 auto-align = true
 align-mode = "stack"       # "side" (CR-001 default) or "stack" (this CR)
-align-width = 0.9          # focused window width as ratio of screen (0.1–1.0)
-align-height = 0.9         # focused window height in stack mode (0.1–1.0, stack layout only)
-align-gap = 20             # pixels of margin around the focused window
+
+[window.stack-align]
+width = 0.9                # focused window width as ratio of screen (0.1–1.0)
+height = 0.9               # focused window height in stack mode (0.1–1.0)
+gap = 20                   # pixels of margin around the focused window
 keyboard-only-focus = true
-wallpaper-back = false     # send unfocused windows to desktop wallpaper layer (macOS only, stack mode)
+wallpaper-back = false     # send unfocused windows to desktop wallpaper layer (macOS only)
+```
+
+The side alignment (CR-001) has its own independent section:
+
+```toml
+[window.side-align]
+width = 0.8
+gap = 10
+peek-width = 50
+keyboard-only-focus = false
 ```
 
 ### 2. Layout Engine — `router/alignment.rs`
@@ -231,9 +232,17 @@ pub fn apply_stack_layout(
     gap: u32,
     align_width: f32,
     align_height: f32,
+    wallpaper_back: bool,
 ) {
     let len = window_order.len();
     if len < 2 {
+        // When wallpaper_back is active the single remaining
+        // window may have been a back-row window at Desktop
+        // level and back-row size. Resize it to the focused
+        // slot and restore to WindowLevel::Normal.
+        if wallpaper_back && len == 1 {
+            // ... resize single window to focused slot ...
+        }
         return;
     }
 
@@ -324,6 +333,7 @@ pub fn cycle_focus_stack(
     gap: u32,
     align_width: f32,
     align_height: f32,
+    wallpaper_back: bool,
     reverse: bool,
 ) -> Option<WindowId> {
     if window_order.len() < 2 {
@@ -405,7 +415,7 @@ String mappings:
 
 ### 5. Default Keybindings — `frontends/rioterm/src/bindings/mod.rs`
 
-Added to **all platform** binding blocks (macOS, Linux x11, Linux Wayland):
+Added to the **cross-platform** `default_key_bindings()` block (works on all platforms without duplication):
 
 ```rust
 // Stack layout focus cycling: Ctrl+Shift+> and Ctrl+Shift+<
@@ -474,7 +484,8 @@ fn align_windows_with(
 /// Cycle using side layout. Sets active mode to Side.
 fn cycle_window_focus(&mut self, reverse: bool) {
     // ...setup omitted...
-    self.keyboard_triggered_focus = true;
+    self.keyboard_focus_suppress_count =
+        self.router.window_order.len() as u32;
     self.active_align_mode = AlignMode::Side;
     // ...call cycle_focus()...
 }
@@ -482,7 +493,8 @@ fn cycle_window_focus(&mut self, reverse: bool) {
 /// Cycle using stack layout. Sets active mode to Stack.
 fn cycle_stack_window_focus(&mut self, reverse: bool) {
     // ...setup omitted...
-    self.keyboard_triggered_focus = true;
+    self.keyboard_focus_suppress_count =
+        self.router.window_order.len() as u32;
     self.active_align_mode = AlignMode::Stack;
     // ...call cycle_focus_stack()...
 }
@@ -629,6 +641,8 @@ When focus cycles from window A to window B:
 
 #### Behavior Notes
 
+- **Edge-to-edge wallpaper windows:** When `wallpaper-back = true`, back-row windows expand edge-to-edge with zero gap. The menu bar offset is reversed (`screen.y - MENU_BAR_HEIGHT`) and the back-row height reclaims the menu bar area (`screen.height + MENU_BAR_HEIGHT`), so wallpaper windows cover the entire display surface.
+- **Single-window recovery:** When `wallpaper-back = true` and only one window remains (the others were closed), the surviving window may still be at `Desktop` level and back-row size. `apply_stack_layout()` detects this case (`len == 1`) and resizes the window to the focused slot, restores it to `WindowLevel::Normal`, and calls `focus_window()`. The `restore_focus_after_close()` method in `application.rs` also promotes windows back to normal level after a close event.
 - **Non-macOS platforms:** `wallpaper-back` is ignored — windows stay at normal level with standard z-ordering
 - **Disabling:** Setting `wallpaper-back = false` (or omitting it) restores all windows to normal level and uses the default z-order stacking behavior
 - **Config reload:** When `wallpaper-back` changes from `true` to `false`, all windows are restored to normal window level
@@ -704,7 +718,7 @@ Window A shrinks from focused size to back-row size. Window B expands to focused
 1. Add `AlignMode` enum and `align_mode` field to `rio-backend/src/config/window.rs`
 2. Add `CycleStackWindowNext` / `CycleStackWindowPrev` to `RioEvent` enum in `rio-backend/src/event/mod.rs`
 3. Add `CycleStackWindowNext` / `CycleStackWindowPrev` to `Action` enum + string parsing in `frontends/rioterm/src/bindings/mod.rs`
-4. Add default keybindings `Ctrl+Shift+.` / `Ctrl+Shift+,` to all platform binding blocks
+4. Add default keybindings `Ctrl+Shift+.` / `Ctrl+Shift+,` to the cross-platform binding block
 5. Add `apply_stack_layout()` and `cycle_focus_stack()` to `router/alignment.rs` — unfocused windows arranged left-to-right filling desktop
 6. Add `cycle_stack_window_next()` / `cycle_stack_window_prev()` to `ContextManager`
 7. Add `Act::CycleStackWindowNext` / `Act::CycleStackWindowPrev` dispatch in `Screen`
@@ -725,7 +739,7 @@ Window A shrinks from focused size to back-row size. Window B expands to focused
 
 | File | Change |
 |---|---|
-| `rio-backend/src/config/window.rs` | Add `AlignMode` enum, `align_mode` field, `align_height` field, `wallpaper_back` field, defaults. Remove `stack_offset` field |
+| `rio-backend/src/config/window.rs` | Add `AlignMode` enum, `align_mode` field, `StackAlign` struct (with `width`, `height`, `gap`, `keyboard_only_focus`, `wallpaper_back`), `SideAlign` struct (with `width`, `gap`, `peek_width`, `keyboard_only_focus`). Each layout mode has fully independent configuration. Remove old flat `align_width`, `align_gap`, `align_height`, `peek_width`, `keyboard_only_focus`, `wallpaper_back` fields |
 | `rio-backend/src/event/mod.rs` | Add `CycleStackWindowNext`, `CycleStackWindowPrev` variants to `RioEvent` |
 | `frontends/rioterm/src/bindings/mod.rs` | Add `CycleStackWindowNext`, `CycleStackWindowPrev` to `Action` enum, string parsing, and default keybindings (`Ctrl+Shift+.` / `Ctrl+Shift+,`) |
 | `frontends/rioterm/src/router/alignment.rs` | Add `apply_stack_layout()` (back-row left-to-right), `cycle_focus_stack()`. Add `align_height` parameter to `apply_stack_layout()` and `cycle_focus_stack()` (stack layout only). Add `wallpaper_back` parameter for window level manipulation (macOS) |

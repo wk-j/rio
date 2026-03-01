@@ -12,7 +12,7 @@ Files are named `docs/cr/NNN-short-description.md` where NNN is the next availab
 number (zero-padded to 3 digits). Check existing files to find the next number:
 
 ```
-docs/cr/001-auto-window-alignment.md
+docs/cr/001-side-window-alignment.md
 docs/cr/002-ctrl-option-key-combinations.md
 ...
 docs/cr/009-command-overlay-panel.md

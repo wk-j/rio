@@ -148,6 +148,102 @@ impl Default for AlignMode {
     }
 }
 
+/// Configuration for the side alignment layout (CR-001).
+/// Focused window on the left, unfocused windows stacked
+/// vertically on the right.
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
+pub struct SideAlign {
+    /// Focused window width as a ratio of screen (0.1–1.0).
+    #[serde(default = "default_side_align_width")]
+    pub width: f32,
+    /// Pixels of margin between windows.
+    #[serde(default = "default_side_align_gap")]
+    pub gap: u32,
+    /// Reserved for future use (peek offset).
+    #[serde(default = "default_side_peek_width", rename = "peek-width")]
+    pub peek_width: u32,
+    /// When true, layout only changes via keyboard shortcuts,
+    /// ignoring mouse clicks and OS-triggered focus changes.
+    #[serde(default = "bool::default", rename = "keyboard-only-focus")]
+    pub keyboard_only_focus: bool,
+}
+
+fn default_side_align_width() -> f32 {
+    1.0
+}
+
+fn default_side_align_gap() -> u32 {
+    10
+}
+
+fn default_side_peek_width() -> u32 {
+    50
+}
+
+impl Default for SideAlign {
+    fn default() -> Self {
+        Self {
+            width: default_side_align_width(),
+            gap: default_side_align_gap(),
+            peek_width: default_side_peek_width(),
+            keyboard_only_focus: false,
+        }
+    }
+}
+
+/// Configuration for the stack alignment layout (CR-014).
+/// Focused window in front at near-full size, unfocused
+/// windows arranged left-to-right behind it.
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
+pub struct StackAlign {
+    /// Focused window width as a ratio of screen (0.1–1.0).
+    #[serde(default = "default_stack_align_width")]
+    pub width: f32,
+    /// Focused window height as a ratio of screen (0.1–1.0).
+    /// Only affects the focused window; unfocused windows use
+    /// full screen height.
+    #[serde(default = "default_stack_align_height")]
+    pub height: f32,
+    /// Pixels of margin between windows.
+    #[serde(default = "default_stack_align_gap")]
+    pub gap: u32,
+    /// When true, layout only changes via keyboard shortcuts,
+    /// ignoring mouse clicks and OS-triggered focus changes.
+    #[serde(default = "bool::default", rename = "keyboard-only-focus")]
+    pub keyboard_only_focus: bool,
+    /// When true, unfocused windows in stack mode are sent to
+    /// the macOS desktop wallpaper layer, placing them behind
+    /// all normal applications. The focused window stays at the
+    /// normal window level. On non-macOS platforms this is
+    /// ignored.
+    #[serde(default = "bool::default", rename = "wallpaper-back")]
+    pub wallpaper_back: bool,
+}
+
+fn default_stack_align_width() -> f32 {
+    1.0
+}
+
+fn default_stack_align_height() -> f32 {
+    1.0
+}
+
+fn default_stack_align_gap() -> u32 {
+    10
+}
+
+impl Default for StackAlign {
+    fn default() -> Self {
+        Self {
+            width: default_stack_align_width(),
+            height: default_stack_align_height(),
+            gap: default_stack_align_gap(),
+            keyboard_only_focus: false,
+            wallpaper_back: false,
+        }
+    }
+}
+
 #[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
 pub struct Window {
     #[serde(default = "default_window_width")]
@@ -181,47 +277,21 @@ pub struct Window {
     pub windows_corner_preference: Option<WindowsCornerPreference>,
     #[serde(default = "Colorspace::default")]
     pub colorspace: Colorspace,
+    /// Master toggle for automatic window alignment.
     #[serde(default = "bool::default", rename = "auto-align")]
     pub auto_align: bool,
-    #[serde(default = "default_peek_width", rename = "peek-width")]
-    pub peek_width: u32,
-    #[serde(default = "default_align_gap", rename = "align-gap")]
-    pub align_gap: u32,
-    #[serde(default = "default_align_width", rename = "align-width")]
-    pub align_width: f32,
-    #[serde(default = "default_align_height", rename = "align-height")]
-    pub align_height: f32,
+    /// Default alignment mode: "side" (CR-001) or "stack" (CR-014).
     #[serde(default = "AlignMode::default", rename = "align-mode")]
     pub align_mode: AlignMode,
-    /// When true, window focus changes only via keyboard shortcuts (CycleWindowNext/Prev),
-    /// ignoring mouse clicks and OS-triggered focus changes for auto-align purposes.
-    #[serde(default = "bool::default", rename = "keyboard-only-focus")]
-    pub keyboard_only_focus: bool,
-    /// When true, unfocused windows in stack mode are sent to
-    /// the macOS desktop wallpaper layer, placing them behind
-    /// all normal applications. The focused window stays at the
-    /// normal window level. On non-macOS platforms this is ignored.
-    #[serde(default = "bool::default", rename = "wallpaper-back")]
-    pub wallpaper_back: bool,
+    /// Side alignment configuration (CR-001).
+    #[serde(default = "SideAlign::default", rename = "side-align")]
+    pub side_align: SideAlign,
+    /// Stack alignment configuration (CR-014).
+    #[serde(default = "StackAlign::default", rename = "stack-align")]
+    pub stack_align: StackAlign,
     /// Glowing border effect around the window edges (Opera GX style).
     #[serde(default = "BorderGlow::default", rename = "border-glow")]
     pub border_glow: BorderGlow,
-}
-
-fn default_peek_width() -> u32 {
-    50
-}
-
-fn default_align_gap() -> u32 {
-    10
-}
-
-fn default_align_width() -> f32 {
-    1.0
-}
-
-fn default_align_height() -> f32 {
-    1.0
 }
 
 impl Default for Window {
@@ -242,13 +312,9 @@ impl Default for Window {
             windows_corner_preference: None,
             colorspace: Colorspace::default(),
             auto_align: false,
-            peek_width: default_peek_width(),
-            align_gap: default_align_gap(),
-            align_width: default_align_width(),
-            align_height: default_align_height(),
             align_mode: AlignMode::default(),
-            keyboard_only_focus: false,
-            wallpaper_back: false,
+            side_align: SideAlign::default(),
+            stack_align: StackAlign::default(),
             border_glow: BorderGlow::default(),
         }
     }
