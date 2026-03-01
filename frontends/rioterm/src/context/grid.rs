@@ -326,7 +326,8 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
     }
 
     /// Open the quick terminal with a pre-created context.
-    /// The QT is rendered as an overlay — main pane dimensions are untouched.
+    /// The QT is rendered as a floating 2D panel anchored to the bottom of the
+    /// window — main pane dimensions are untouched and remain visible above.
     pub fn open_quick_terminal(&mut self, context: Context<T>) {
         // Cancel zoom if active
         self.zoomed_key = None;
@@ -336,15 +337,18 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         // Create grid item
         let mut item = ContextGridItem::new(context);
 
-        // Use the same dimensions as a full-size main pane (accounting for margins)
+        // Size to bottom 40% of the window, full width (margins applied)
         let scale = item.val.dimension.dimension.scale;
         let margin_x = self.margin.x * scale;
-        let margin_y = (self.margin.top_y + self.margin.bottom_y) * scale;
-        item.val.dimension.update_width(self.width - margin_x);
-        item.val.dimension.update_height(self.height - margin_y);
+        let margin_bottom = self.margin.bottom_y * scale;
+        let panel_height = (self.height * 0.4).max(100.0 * scale) - margin_bottom;
+        let panel_width = self.width - margin_x;
+        item.val.dimension.update_width(panel_width);
+        item.val.dimension.update_height(panel_height);
 
-        // Position at the same margin as main panes
-        item.set_position([self.margin.x, self.margin.top_y]);
+        // Anchor to the bottom of the window
+        let pos_y = (self.height - panel_height) / scale - self.margin.bottom_y;
+        item.set_position([self.margin.x, pos_y]);
 
         // Resize PTY to match the overlay dimensions
         let mut terminal = item.val.terminal.lock();
@@ -380,14 +384,17 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 qt.saved_focus = self.current;
                 self.current = qt.item.val.route_id;
 
-                // Update quick terminal dimensions and position (same as main pane)
+                // Re-apply bottom-40% panel dimensions (window may have resized)
                 let scale = qt.item.val.dimension.dimension.scale;
                 let margin_x = self.margin.x * scale;
-                let margin_y = (self.margin.top_y + self.margin.bottom_y) * scale;
-                qt.item.val.dimension.update_width(self.width - margin_x);
-                qt.item.val.dimension.update_height(self.height - margin_y);
+                let margin_bottom = self.margin.bottom_y * scale;
+                let panel_height = (self.height * 0.4).max(100.0 * scale) - margin_bottom;
+                let panel_width = self.width - margin_x;
+                qt.item.val.dimension.update_width(panel_width);
+                qt.item.val.dimension.update_height(panel_height);
 
-                qt.item.set_position([self.margin.x, self.margin.top_y]);
+                let pos_y = (self.height - panel_height) / scale - self.margin.bottom_y;
+                qt.item.set_position([self.margin.x, pos_y]);
 
                 // Resize QT's own PTY
                 let mut terminal = qt.item.val.terminal.lock();
@@ -404,7 +411,8 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         }
     }
 
-    /// Resize the quick terminal divider by the given amount (positive = taller, negative = shorter).
+    /// Resize the quick terminal panel by the given pixel amount.
+    /// Positive = taller (panel top edge moves up), negative = shorter.
     /// Returns true if the resize was applied.
     pub fn resize_quick_terminal(&mut self, amount: f32) -> bool {
         let qt = match self.quick_terminal {
@@ -413,25 +421,22 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         };
 
         let scale = qt.item.val.dimension.dimension.scale;
-        let min_height = self.height * 0.1;
-        let max_height = self.height * 0.8;
-        let current_qt_height = qt.item.val.dimension.height;
-        let new_qt_height = (current_qt_height + amount).clamp(min_height, max_height);
-        let actual_delta = new_qt_height - current_qt_height;
+        let margin_bottom = self.margin.bottom_y * scale;
+        let min_height = (self.height * 0.1).max(60.0 * scale);
+        let max_height = (self.height * 0.8) - margin_bottom;
+        let current_height = qt.item.val.dimension.height;
+        let new_height = (current_height + amount).clamp(min_height, max_height);
 
-        if actual_delta.abs() < 0.1 {
+        if (new_height - current_height).abs() < 0.1 {
             return false;
         }
 
-        // Update quick terminal height
-        qt.item.val.dimension.update_height(new_qt_height);
-
-        // Reposition quick terminal
-        let new_main_height = self.height - new_qt_height;
-        let pos_y = new_main_height / scale;
+        // Update panel height and reanchor to bottom
+        qt.item.val.dimension.update_height(new_height);
+        let pos_y = (self.height - new_height) / scale - self.margin.bottom_y;
         qt.item.set_position([self.margin.x, pos_y]);
 
-        // Resize quick terminal PTY
+        // Resize PTY to match new panel height
         let mut terminal = qt.item.val.terminal.lock();
         terminal.resize::<ContextDimension>(qt.item.val.dimension);
         drop(terminal);
@@ -837,30 +842,29 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             self.plot_objects(target);
         }
 
-        // Add quick terminal overlay if visible — rendered on top of main panes
+        // Add quick terminal overlay if visible — rendered as a floating 2D
+        // panel on top of main panes (main panes remain visible above the panel).
         if let Some(ref qt) = self.quick_terminal {
             if qt.visible {
                 let scale = qt.item.val.dimension.dimension.scale;
-                let qt_pos_y = qt.item.position()[1];
-                let separator_height = self.scaled_padding / scale;
+                let pos = qt.item.position();
+                let panel_w = qt.item.val.dimension.width / scale;
+                let panel_h = qt.item.val.dimension.height / scale;
 
-                // Opaque background quad to cover main pane content beneath the overlay
+                // Floating panel background with rounded top corners, border,
+                // and a subtle drop shadow — styled like command overlay panels.
+                let mut bg = background_color;
+                bg[3] = 1.0; // fully opaque panel background
                 target.push(Object::Quad(Quad {
-                    position: [0.0, qt_pos_y - separator_height],
-                    color: background_color,
-                    size: [
-                        self.width / scale,
-                        (qt.item.val.dimension.height / scale) + separator_height,
-                    ],
-                    ..Quad::default()
-                }));
-
-                // Separator line between main area and quick terminal
-                target.push(Object::Quad(Quad {
-                    position: [0.0, qt_pos_y - separator_height],
-                    color: self.border_color,
-                    size: [self.width / scale, separator_height],
-                    ..Quad::default()
+                    position: pos,
+                    color: bg,
+                    size: [panel_w, panel_h],
+                    border_radius: [6.0, 6.0, 0.0, 0.0],
+                    border_color: self.border_color,
+                    border_width: 1.0,
+                    shadow_color: [0.0, 0.0, 0.0, 0.4],
+                    shadow_offset: [0.0, -4.0],
+                    shadow_blur_radius: 16.0,
                 }));
 
                 target.push(qt.item.rich_text_object.clone());

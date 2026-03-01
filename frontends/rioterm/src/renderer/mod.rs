@@ -1171,28 +1171,14 @@ impl Renderer {
         let grid = context_manager.current_grid_mut();
         let active_key = grid.current;
         let zoomed_key = grid.zoomed_key;
+        let qt_visible = grid.is_quick_terminal_visible();
         let mut has_active_changed = false;
         if self.last_active != Some(active_key) {
             has_active_changed = true;
             self.last_active = Some(active_key);
         }
 
-        let qt_visible = grid.is_quick_terminal_visible();
-
         for (key, grid_context) in grid.contexts_mut().iter_mut() {
-            // When quick terminal is visible, clear and skip main panes —
-            // the QT overlay covers the full window so main pane content is hidden.
-            // We must clear the rich text so stale content from the previous frame
-            // doesn't bleed through.
-            if qt_visible {
-                let rich_text_id = grid_context.context().rich_text_id;
-                let content = sugarloaf.content();
-                content.sel(rich_text_id);
-                content.clear();
-                content.build();
-                continue;
-            }
-
             // When zoomed, skip rendering all splits except the zoomed one
             if let Some(zk) = zoomed_key {
                 if *key != zk {
