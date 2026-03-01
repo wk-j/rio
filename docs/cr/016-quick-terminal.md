@@ -6,10 +6,11 @@
 
 ## Summary
 
-Implement a quick terminal overlay — a persistent PTY that slides over all existing
-panes with a single keybinding. Inspired by iTerm2's Hotkey Window and Guake.
-Toggling the same key shows/hides the overlay without destroying the shell session.
-The overlay inherits the CWD of the previously focused pane.
+Implement a quick terminal overlay — a persistent PTY panel that floats over
+existing panes with a single keybinding. Inspired by iTerm2's Hotkey Window and
+Guake. Toggling the same key shows/hides the panel without destroying the shell
+session. The panel is anchored to the bottom of the window, leaving main panes
+fully visible above it. Appearance and geometry are fully configurable.
 
 ## Motivation
 
@@ -18,37 +19,41 @@ The overlay inherits the CWD of the previously focused pane.
 2. **Session persistence** — the PTY stays alive when hidden; processes keep running.
 3. **CWD inheritance** — opens in the working directory of the active pane so
    clipboard-less file path reuse is immediate.
-4. **Resizable** — height is adjustable with the existing divider resize keys.
+4. **Resizable** — height is adjustable live with the existing divider resize keys.
+5. **2D layer feel** — main pane content remains visible above the panel, making
+   the quick terminal feel like a floating layer rather than a modal takeover.
 
 ## User Flow
 
 ```
 1. User presses ToggleQuickTerminal binding (e.g. Ctrl+`)
-2. Quick terminal overlay appears covering the full pane area
-3. User runs commands; pane content beneath is preserved unchanged
-4. Press binding again → overlay hides, focus returns to previous pane
-5. Press binding again → overlay re-appears with the same shell, same history
-6. User types `exit` → shell exits, overlay is destroyed; pane regains focus
-7. Window resize → overlay auto-dismisses (hides, not destroyed)
-8. Switching tab / creating split → overlay auto-dismisses
+2. Floating panel slides up from the bottom (40% height by default)
+3. Main pane content stays visible above the panel
+4. User runs commands in the panel
+5. Press binding again → panel hides, focus returns to previous pane
+6. Press binding again → panel re-appears with the same shell, same history
+7. User types `exit` → shell exits, panel is destroyed; pane regains focus
+8. Window resize → panel auto-dismisses (hides, not destroyed)
+9. Switching tab / creating split → panel auto-dismisses
 ```
 
 ### Visual Example
 
 ```
 +--------------------------------------------------+
-| $ cargo build                                     |   ← main pane (hidden under QT)
+| $ cargo build                                     |   ← main pane (visible)
 |    Compiling rio v0.2.0                          |
 |    ...                                           |
-+==================================================+   ← separator line (border_color)
-| $ █                                              |   ← quick terminal overlay
-|                                                  |
-|                                                  |
++┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄+
+|╭────────────────────────────────────────────────╮|   ← floating panel
+|| $ █                                            ||
+||                                                ||
+|╰────────────────────────────────────────────────╯|
 +--------------------------------------------------+
 ```
 
-The separator is a thin horizontal quad rendered in `border_color`. The overlay
-background is opaque so main pane content does not bleed through.
+The panel has rounded top corners, a configurable border, and a drop shadow.
+Main pane content is rendered normally beneath it.
 
 ## Architecture
 
@@ -89,28 +94,48 @@ ContextManager::toggle_quick_terminal(rich_text_id)
         └─► quick_terminal is Some?
                 │
                 ├─► visible = true  ──► hide (visible=false, restore saved_focus)
-                └─► visible = false ──► show (visible=true, save current focus, update dims)
+                └─► visible = false ──► show (visible=true, save focus, update dims)
 ```
+
+### Panel Geometry
+
+The panel is sized using `QuickTerminalConfig::height` (a 0.0–1.0 fraction of
+window height, default 0.4), anchored to the bottom edge:
+
+```rust
+let height_frac = self.quick_terminal_config.height.clamp(0.1, 0.9);
+let panel_height = (self.height * height_frac).max(60.0 * scale) - margin_bottom;
+let panel_width  = self.width - margin_x;
+let pos_y        = (self.height - panel_height) / scale - self.margin.bottom_y;
+```
+
+Main pane dimensions are never modified — the panel is a pure visual overlay.
 
 ### Resize
 
-The QT is sized to the full window minus margins when shown. The divider resize
-actions (`MoveDividerUp` / `MoveDividerDown`) are intercepted in `screen/mod.rs`
-when the QT is visible and forwarded to `resize_quick_terminal(±20.0)` instead
-of the normal split resize path. Height is clamped between 10%–80% of window height.
+The divider resize actions (`MoveDividerUp` / `MoveDividerDown`) are intercepted
+in `screen/mod.rs` when the QT is visible and forwarded to
+`resize_quick_terminal(±20.0)`. The new height is reclamped and the panel is
+reanchored from the bottom. Clamped between 10%–80% of window height (or 60px
+minimum).
 
-### Rendering — Two-Pass
+### Rendering
 
-1. **Main pane pass** — when `is_quick_terminal_visible()` is true, every main pane
-   rich text is cleared (`content.clear()`) and skipped. Main pane PTYs are not
-   re-rendered; their dimension data is untouched.
-2. **Overlay pass** — QT content is always rendered with `TerminalDamage::Full` and
-   `bg_opacity_override = Some(1.0)` (opaque backgrounds) so default-background
-   cells fully occlude anything beneath them.
-3. **Object list** — three GPU objects are appended after all main-pane objects:
-   - Opaque background `Quad` (covers the separator + content area)
-   - Separator `Quad` (thin, `border_color`)
-   - QT `RichText` object
+Main panes render normally at all times — the QT is a 2D layer on top, not a
+replacement. The object list for a frame is:
+
+```
+[main pane quads + RichTexts]   ← rendered first, visible above panel
+[QT background Quad]            ← rounded top corners, border, drop shadow
+[QT RichText]                   ← terminal content rendered on top
+```
+
+The QT `RichText` is always rendered with `TerminalDamage::Full` and
+`bg_opacity_override = Some(config.opacity)` so default-background cells use the
+configured opacity.
+
+Panel background quad uses `border_radius: [r, r, 0.0, 0.0]` — only the top
+corners are rounded; the bottom corners stay flush with the window edge.
 
 ### Dismissal Sites
 
@@ -133,19 +158,50 @@ hidden) and focus returns to `saved_focus`.
 ### Tab Bar
 
 When the QT is visible, the tab bar renders no tab as active (`!qt_visible &&
-i == current`), reflecting that the overlay is transient and does not belong to any
-specific split layout.
+i == current`), reflecting that the overlay is transient and does not belong to
+any specific split layout.
 
 ## Configuration
 
-No dedicated configuration section. The feature integrates with the existing
-keybinding system:
+### Keybinding
 
 ```toml
 [bindings]
 keys = [
     { key = "`", mods = "Control", action = "ToggleQuickTerminal" },
 ]
+```
+
+### `[quick-terminal]` section
+
+```toml
+[quick-terminal]
+# Panel height as a fraction of window height (0.1–0.9). Default: 0.4
+height = 0.4
+
+# Background opacity (0.0 = transparent, 1.0 = opaque). Default: 1.0
+opacity = 1.0
+
+# Top corner rounding in scaled pixels (0.0 = sharp). Default: 6.0
+border-radius = 6.0
+
+# Border thickness in scaled pixels (0.0 = no border). Default: 1.0
+border-width = 1.0
+
+# Border color. Default: transparent (uses terminal split color).
+border-color = '#44475a'
+
+# Background color. Default: transparent (uses terminal background).
+background-color = '#1e1e2e'
+
+# Drop shadow blur radius (0.0 = no shadow). Default: 16.0
+shadow-blur-radius = 16.0
+
+# Drop shadow color. Default: '#00000066'.
+shadow-color = '#00000066'
+
+# Drop shadow offset [x, y]. Default: [0.0, -4.0]
+shadow-offset = [0.0, -4.0]
 ```
 
 CWD inheritance is controlled by the global `cwd` flag:
@@ -155,15 +211,20 @@ CWD inheritance is controlled by the global `cwd` flag:
 cwd = true
 ```
 
+All settings support hot-reload — changes to `config.toml` apply immediately
+without restarting.
+
 ## Files Modified
 
 | File | Changes |
 |------|---------|
-| `frontends/rioterm/src/context/grid.rs` | `QuickTerminalState<T>`, `ContextGrid::quick_terminal` field, `open_quick_terminal()`, `toggle_quick_terminal()`, `resize_quick_terminal()`, focus routing in `current()` / `current_mut()` / `current_position()` / `current_context_with_computed_dimension()`, object list building in `extend_with_objects()`, dismiss on `resize()` |
-| `frontends/rioterm/src/context/mod.rs` | `ContextManager::toggle_quick_terminal()`, `dismiss_quick_terminal()` (8 call sites), PTY exit handling in `should_close_context_manager()` |
-| `frontends/rioterm/src/renderer/mod.rs` | Two-pass rendering: clear-main-panes loop, QT content render block, `bg_opacity_override = Some(1.0)` |
+| `rio-backend/src/config/quick_terminal.rs` | New: `QuickTerminalConfig` struct with all panel appearance fields and defaults |
+| `rio-backend/src/config/mod.rs` | Register `pub mod quick_terminal`, import type, add `quick_terminal` field to `Config` and `Config::default()` |
+| `frontends/rioterm/src/context/grid.rs` | `QuickTerminalState<T>`, `ContextGrid::quick_terminal_config` field, geometry from config in `open_quick_terminal()` / `toggle_quick_terminal()`, config-driven panel quad in `extend_with_objects()`, clamp in `resize_quick_terminal()`, focus routing, dismiss on resize |
+| `frontends/rioterm/src/context/mod.rs` | `quick_terminal` field on `ContextManagerConfig`, pass through all `ContextGrid::new()` call sites (×3), `toggle_quick_terminal()`, `dismiss_quick_terminal()`, PTY exit handling |
+| `frontends/rioterm/src/renderer/mod.rs` | Removed main-pane clear loop (panes stay visible), `qt_bg_opacity` from config, QT content render block |
 | `frontends/rioterm/src/renderer/navigation.rs` | Tab bar active-tab suppression when `qt_visible` |
-| `frontends/rioterm/src/screen/mod.rs` | `Act::ToggleQuickTerminal` dispatch (×2), `Act::MoveDivider{Up,Down}` intercept for QT resize |
+| `frontends/rioterm/src/screen/mod.rs` | `ToggleQuickTerminal` dispatch (×2), `MoveDivider{Up,Down}` intercept, initial config wiring, hot-reload sync |
 | `frontends/rioterm/src/bindings/mod.rs` | `Action::ToggleQuickTerminal` variant, `"togglequickterminal"` config string parser |
 
 ## References

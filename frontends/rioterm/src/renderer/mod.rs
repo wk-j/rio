@@ -640,11 +640,29 @@ impl Renderer {
             // ANSI colors (set by the program) keep their full opacity.
             // Cells with the default background get the overlay's opacity
             // so only the panel background is translucent.
+            //
+            // When dynamic_background.2 is false (no window transparency /
+            // background image), create_style always emits Some(bg_color)
+            // even for default-background cells, so the is_none() branch
+            // would never fire. We also handle the Some(color) case: if the
+            // cell's background matches the terminal's named background color
+            // it is a "default" cell and should receive the opacity override.
             if let Some(opacity) = bg_opacity_override {
-                if style.background_color.is_none() {
-                    let mut bg = self.named_colors.background.0;
-                    bg[3] = opacity;
-                    style.background_color = Some(bg);
+                let named_bg = self.named_colors.background.0;
+                match style.background_color {
+                    None => {
+                        let mut bg = named_bg;
+                        bg[3] = opacity;
+                        style.background_color = Some(bg);
+                    }
+                    Some(ref mut bg)
+                        if bg[0] == named_bg[0]
+                            && bg[1] == named_bg[1]
+                            && bg[2] == named_bg[2] =>
+                    {
+                        bg[3] = opacity;
+                    }
+                    _ => {}
                 }
             }
 
@@ -1417,6 +1435,7 @@ impl Renderer {
         }
 
         // Render quick terminal content if visible
+        let qt_bg_opacity = grid.quick_terminal_config.opacity;
         if let Some(ref mut qt) = grid.quick_terminal {
             if qt.visible {
                 let is_active = qt.item.val.route_id == active_key;
@@ -1479,7 +1498,7 @@ impl Renderer {
                         &None, // no focused match
                         &terminal_snapshot.colors,
                         is_active,
-                        Some(1.0), // force opaque bg: QT is overlay
+                        Some(qt_bg_opacity),
                     );
                 }
                 content.build();

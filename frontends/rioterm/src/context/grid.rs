@@ -3,7 +3,7 @@ use crate::mouse::Mouse;
 use rio_backend::crosswords::grid::Dimensions;
 use rio_backend::event::EventListener;
 use rio_backend::sugarloaf::{
-    layout::SugarDimensions, Object, Quad, RichText, Sugarloaf,
+    layout::SugarDimensions, Object, Quad, RichText, RichTextLinesRange, Sugarloaf,
 };
 use std::collections::HashMap;
 
@@ -148,6 +148,8 @@ pub struct ContextGrid<T: EventListener> {
     pub zoomed_key: Option<usize>,
     /// Quick terminal state (overlay terminal at bottom)
     pub quick_terminal: Option<QuickTerminalState<T>>,
+    /// Appearance and geometry config for the quick terminal panel
+    pub quick_terminal_config: rio_backend::config::quick_terminal::QuickTerminalConfig,
     /// Command output overlays (floating, click-through, real PTY)
     pub command_overlays: Vec<CommandOverlayState<T>>,
     /// Appearance config for command overlay panels
@@ -215,6 +217,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         margin: Delta<f32>,
         border_color: [f32; 4],
         command_overlay_style: rio_backend::config::command_overlay::CommandOverlayStyle,
+        quick_terminal_config: rio_backend::config::quick_terminal::QuickTerminalConfig,
     ) -> Self {
         let width = context.dimension.width;
         let height = context.dimension.height;
@@ -234,6 +237,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             root: Some(root_key),
             zoomed_key: None,
             quick_terminal: None,
+            quick_terminal_config,
             command_overlays: Vec::new(),
             command_overlay_style,
         };
@@ -337,11 +341,12 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         // Create grid item
         let mut item = ContextGridItem::new(context);
 
-        // Size to bottom 40% of the window, full width (margins applied)
+        // Size to the configured height fraction, full width (margins applied)
         let scale = item.val.dimension.dimension.scale;
         let margin_x = self.margin.x * scale;
         let margin_bottom = self.margin.bottom_y * scale;
-        let panel_height = (self.height * 0.4).max(100.0 * scale) - margin_bottom;
+        let height_frac = self.quick_terminal_config.height.clamp(0.1, 0.9);
+        let panel_height = (self.height * height_frac).max(60.0 * scale) - margin_bottom;
         let panel_width = self.width - margin_x;
         item.val.dimension.update_width(panel_width);
         item.val.dimension.update_height(panel_height);
@@ -384,11 +389,13 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 qt.saved_focus = self.current;
                 self.current = qt.item.val.route_id;
 
-                // Re-apply bottom-40% panel dimensions (window may have resized)
+                // Re-apply configured panel dimensions (window may have resized)
                 let scale = qt.item.val.dimension.dimension.scale;
                 let margin_x = self.margin.x * scale;
                 let margin_bottom = self.margin.bottom_y * scale;
-                let panel_height = (self.height * 0.4).max(100.0 * scale) - margin_bottom;
+                let height_frac = self.quick_terminal_config.height.clamp(0.1, 0.9);
+                let panel_height =
+                    (self.height * height_frac).max(60.0 * scale) - margin_bottom;
                 let panel_width = self.width - margin_x;
                 qt.item.val.dimension.update_width(panel_width);
                 qt.item.val.dimension.update_height(panel_height);
@@ -809,6 +816,57 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         }
     }
 
+    /// Compute the maximum number of lines to render for a main pane
+    /// item so that its cells do not overlap the quick terminal panel.
+    /// Returns `None` if no clipping is needed (QT hidden or no overlap).
+    fn qt_clip_lines_for_item(
+        &self,
+        item: &ContextGridItem<T>,
+    ) -> Option<RichTextLinesRange> {
+        let qt = self.quick_terminal.as_ref()?;
+        if !qt.visible {
+            return None;
+        }
+
+        let qt_top_y = qt.item.position()[1];
+        let item_y = item.position()[1];
+        if qt_top_y <= item_y {
+            // QT covers the entire item — show nothing
+            return Some(RichTextLinesRange { start: 0, end: 0 });
+        }
+
+        let dim = &item.val.dimension;
+        let scale = dim.dimension.scale;
+        if scale <= 0.0 || dim.dimension.height <= 0.0 || dim.line_height <= 0.0 {
+            return None;
+        }
+        let char_height = (dim.dimension.height / scale) * dim.line_height;
+        let available = qt_top_y - item_y;
+        let clip = (available / char_height).floor() as usize;
+        let total = dim.lines;
+
+        if clip >= total {
+            // No clipping needed — QT doesn't overlap this item
+            None
+        } else {
+            Some(RichTextLinesRange {
+                start: 0,
+                end: clip,
+            })
+        }
+    }
+
+    /// Clone the item's RichText object, applying QT clipping if needed.
+    fn clipped_rich_text_object(&self, item: &ContextGridItem<T>) -> Object {
+        let mut obj = item.rich_text_object.clone();
+        if let Some(clip) = self.qt_clip_lines_for_item(item) {
+            if let Object::RichText(ref mut rt) = obj {
+                rt.lines = Some(clip);
+            }
+        }
+        obj
+    }
+
     #[inline]
     pub fn extend_with_objects(
         &self,
@@ -823,7 +881,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         // When zoomed, only show the zoomed split (no border quads)
         if let Some(zoomed) = self.zoomed_key {
             if let Some(item) = self.inner.get(&zoomed) {
-                target.push(item.rich_text_object.clone());
+                target.push(self.clipped_rich_text_object(item));
             }
             return;
         }
@@ -835,43 +893,58 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         if len == 1 {
             if let Some(root) = self.root {
                 if let Some(item) = self.inner.get(&root) {
-                    target.push(item.rich_text_object.clone());
+                    target.push(self.clipped_rich_text_object(item));
                 }
             }
         } else {
-            self.plot_objects(target);
+            self.plot_objects_clipped(target);
         }
 
-        // Add quick terminal overlay if visible — rendered as a floating 2D
-        // panel on top of main panes (main panes remain visible above the panel).
+        // Quick terminal panel — background quad + rich text rendered
+        // in the main pass. QT cells have opaque backgrounds (via
+        // bg_opacity_override) so they cover the main pane cells.
         if let Some(ref qt) = self.quick_terminal {
             if qt.visible {
+                let cfg = &self.quick_terminal_config;
                 let scale = qt.item.val.dimension.dimension.scale;
                 let pos = qt.item.position();
                 let panel_w = qt.item.val.dimension.width / scale;
                 let panel_h = qt.item.val.dimension.height / scale;
 
-                // Floating panel background with rounded top corners, border,
-                // and a subtle drop shadow — styled like command overlay panels.
-                let mut bg = background_color;
-                bg[3] = 1.0; // fully opaque panel background
+                let bg = if cfg.has_custom_background() {
+                    let mut c = cfg.background_color;
+                    c[3] *= cfg.opacity;
+                    c
+                } else {
+                    let mut c = background_color;
+                    c[3] = cfg.opacity;
+                    c
+                };
+
+                let bc = if cfg.has_custom_border_color() {
+                    cfg.border_color
+                } else {
+                    self.border_color
+                };
+
+                let r = cfg.border_radius;
                 target.push(Object::Quad(Quad {
                     position: pos,
                     color: bg,
                     size: [panel_w, panel_h],
-                    border_radius: [6.0, 6.0, 0.0, 0.0],
-                    border_color: self.border_color,
-                    border_width: 1.0,
-                    shadow_color: [0.0, 0.0, 0.0, 0.4],
-                    shadow_offset: [0.0, -4.0],
-                    shadow_blur_radius: 16.0,
+                    border_radius: [r, r, 0.0, 0.0],
+                    border_color: bc,
+                    border_width: cfg.border_width,
+                    shadow_color: cfg.shadow_color,
+                    shadow_offset: cfg.shadow_offset,
+                    shadow_blur_radius: cfg.shadow_blur_radius,
                 }));
 
                 target.push(qt.item.rich_text_object.clone());
             }
         }
 
-        // Add command overlay panels if visible — rendered on top of everything
+        // Command overlay panels
         for overlay in &self.command_overlays {
             if !overlay.visible {
                 continue;
@@ -881,18 +954,11 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             let pos = overlay.item.position();
             let overlay_w = dim.width / scale;
 
-            // Compute tight height from the actual terminal rows so the
-            // background quad does not extend past the last line.
-            // The PTY has `dim.lines` rows; each row is `char_height`
-            // logical pixels.  Add margins to get the final quad height.
             let char_height = (dim.dimension.height / scale) * dim.line_height;
             let margin_spaces = dim.margin.top_y + dim.margin.bottom_y;
             let overlay_h = dim.lines as f32 * char_height + margin_spaces;
             let style = &self.command_overlay_style;
 
-            // Background color for the overlay quad. The opacity only
-            // affects the panel background — program content (ANSI
-            // colored cells) stays fully opaque on top.
             let bg = if style.has_custom_background() {
                 let mut c = style.background_color;
                 c[3] *= style.opacity;
@@ -903,14 +969,12 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 c
             };
 
-            // Determine border color: use config override if set, else split color
             let bc = if style.has_custom_border_color() {
                 style.border_color
             } else {
                 self.border_color
             };
 
-            // Opaque background quad with rounded corners
             target.push(Object::Quad(Quad {
                 position: pos,
                 color: bg,
@@ -923,7 +987,6 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 shadow_blur_radius: style.shadow_blur_radius,
             }));
 
-            // RichText content (terminal output from PTY)
             target.push(overlay.item.rich_text_object.clone());
         }
     }
@@ -1105,14 +1168,30 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             return;
         }
         if let Some(root) = self.root {
-            self.plot_objects_recursive(objects, root);
+            self.plot_objects_recursive(objects, root, false);
         }
     }
 
-    fn plot_objects_recursive(&self, objects: &mut Vec<Object>, key: usize) {
+    /// Like `plot_objects` but applies QT line clipping to each
+    /// main-pane RichText so that cells under the quick terminal panel
+    /// are not rendered.
+    fn plot_objects_clipped(&self, objects: &mut Vec<Object>) {
+        if self.inner.is_empty() {
+            return;
+        }
+        if let Some(root) = self.root {
+            self.plot_objects_recursive(objects, root, true);
+        }
+    }
+
+    fn plot_objects_recursive(&self, objects: &mut Vec<Object>, key: usize, clip: bool) {
         if let Some(item) = self.inner.get(&key) {
-            // Add pre-computed rich text object
-            objects.push(item.rich_text_object.clone());
+            // Add pre-computed rich text object (clipped if QT visible)
+            if clip {
+                objects.push(self.clipped_rich_text_object(item));
+            } else {
+                objects.push(item.rich_text_object.clone());
+            }
 
             let item_pos = item.position();
 
@@ -1133,7 +1212,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
 
             // Recurse down if child exists
             if let Some(down_key) = item.down {
-                self.plot_objects_recursive(objects, down_key);
+                self.plot_objects_recursive(objects, down_key, clip);
             }
 
             // Always create vertical border
@@ -1152,7 +1231,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
 
             // Recurse right if child exists
             if let Some(right_key) = item.right {
-                self.plot_objects_recursive(objects, right_key);
+                self.plot_objects_recursive(objects, right_key, clip);
             }
         }
     }
@@ -2688,6 +2767,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         // The first context should fill completely w/h grid
         assert_eq!(grid.width, context_width);
@@ -2761,6 +2841,7 @@ pub mod test {
             margin,
             [1., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -2890,6 +2971,7 @@ pub mod test {
             margin,
             [1., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -3115,6 +3197,7 @@ pub mod test {
             margin,
             [1., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -3296,6 +3379,7 @@ pub mod test {
             margin,
             [1., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -3424,6 +3508,7 @@ pub mod test {
             margin,
             [0., 0., 1., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -3581,6 +3666,7 @@ pub mod test {
             margin,
             [1., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -3791,6 +3877,7 @@ pub mod test {
             margin,
             [0., 0., 1., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -3933,6 +4020,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -4037,6 +4125,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -4129,6 +4218,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -4232,6 +4322,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -4342,6 +4433,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -4434,6 +4526,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -4537,6 +4630,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -4699,6 +4793,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -4913,6 +5008,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -5223,6 +5319,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         assert_eq!(
@@ -5296,6 +5393,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Test that we can't remove the last context
@@ -5360,6 +5458,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Add multiple splits to create a complex structure
@@ -5415,6 +5514,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // These operations should not crash
@@ -5445,6 +5545,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Add a split
@@ -5480,6 +5581,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Test navigation with single context
@@ -5513,6 +5615,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Create many splits
@@ -5574,6 +5677,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Add a split
@@ -5650,6 +5754,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Single split - should return false
@@ -5695,6 +5800,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Add a split down
@@ -5736,6 +5842,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Single split - should return false
@@ -5804,6 +5911,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Add a split right
@@ -5869,6 +5977,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Add splits
@@ -5911,6 +6020,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Create a complex layout: split right, then split down on the right side
@@ -5956,6 +6066,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Test with zero amount
@@ -5995,6 +6106,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // With only one split, no divider movement should work
@@ -6042,6 +6154,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Create multiple splits
@@ -6101,6 +6214,7 @@ pub mod test {
             margin,
             [0., 0., 0., 0.],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Add a horizontal split
@@ -6187,6 +6301,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Single context should be positioned at margin
@@ -6248,6 +6363,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         grid.split_right(second_context);
 
@@ -6323,6 +6439,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         grid.split_down(second_context);
 
@@ -6397,6 +6514,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Create layout:
@@ -6466,6 +6584,7 @@ pub mod test {
             Delta::default(),
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Verify scaled_padding is correctly calculated and stored
@@ -6502,6 +6621,7 @@ pub mod test {
             Delta::default(),
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         grid.split_right(second_context);
 
@@ -6553,6 +6673,7 @@ pub mod test {
             Delta::default(),
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         grid.split_down(second_context);
 
@@ -6606,6 +6727,7 @@ pub mod test {
             Delta::default(),
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         grid.split_right(second_context);
 
@@ -6657,6 +6779,7 @@ pub mod test {
             Delta::default(),
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         grid.split_down(second_context);
 
@@ -6711,6 +6834,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Split right to get |1|2|
@@ -6823,6 +6947,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         grid.split_right(context2);
         grid.split_down(context3);
@@ -6890,6 +7015,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         grid.split_right(context2);
 
@@ -6939,6 +7065,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Should not be able to move dividers with only one panel
@@ -6974,6 +7101,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         grid.split_down(context2);
 
@@ -7050,6 +7178,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Step 1: Split right to create |1|2|
@@ -7205,6 +7334,7 @@ pub mod test {
             Delta::default(),
             [0.0, 0.0, 0.0, 0.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         let root_key = grid.root.unwrap();
 
@@ -7275,6 +7405,7 @@ pub mod test {
             Delta::default(),
             [0.0, 0.0, 0.0, 0.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         let panel1_key = grid.root.unwrap();
 
@@ -7359,6 +7490,7 @@ pub mod test {
             Delta::default(),
             [0.0, 0.0, 0.0, 0.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         let panel1_key = grid.root.unwrap();
 
@@ -7445,6 +7577,7 @@ pub mod test {
             Delta::default(),
             [0.0, 0.0, 0.0, 0.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
         let root_key = grid.root.unwrap();
 
@@ -7511,6 +7644,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Build layout: |1|2/3|
@@ -7616,6 +7750,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Build layout: |1|2/3|
@@ -7711,6 +7846,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Build layout: |1|2/3|4|
@@ -7794,6 +7930,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Build layout: |1|2/3|
@@ -7855,6 +7992,7 @@ pub mod test {
             margin,
             [1.0, 1.0, 1.0, 1.0],
             rio_backend::config::command_overlay::CommandOverlayStyle::default(),
+            rio_backend::config::quick_terminal::QuickTerminalConfig::default(),
         );
 
         // Build layout: |1|2/3|

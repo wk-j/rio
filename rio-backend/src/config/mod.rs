@@ -9,6 +9,7 @@ pub mod keyboard;
 pub mod leader;
 pub mod navigation;
 pub mod platform;
+pub mod quick_terminal;
 pub mod renderer;
 pub mod sound_effects;
 pub mod theme;
@@ -26,6 +27,7 @@ use crate::config::keyboard::Keyboard;
 use crate::config::leader::Leader;
 use crate::config::navigation::Navigation;
 use crate::config::platform::{Platform, PlatformConfig};
+use crate::config::quick_terminal::QuickTerminalConfig;
 use crate::config::renderer::Renderer;
 use crate::config::sound_effects::SoundEffects;
 use crate::config::title::Title;
@@ -165,6 +167,8 @@ pub struct Config {
     pub leader: Leader,
     #[serde(default = "CommandOverlayStyle::default", rename = "command-overlay")]
     pub command_overlay: CommandOverlayStyle,
+    #[serde(default = "QuickTerminalConfig::default", rename = "quick-terminal")]
+    pub quick_terminal: QuickTerminalConfig,
     #[serde(default)]
     pub distortion: DistortionConfig,
     #[serde(default = "SoundEffects::default", rename = "sound-effects")]
@@ -830,6 +834,7 @@ impl Default for Config {
             bell: Bell::default(),
             leader: Leader::default(),
             command_overlay: CommandOverlayStyle::default(),
+            quick_terminal: QuickTerminalConfig::default(),
             distortion: DistortionConfig::default(),
             sound_effects: SoundEffects::default(),
         }

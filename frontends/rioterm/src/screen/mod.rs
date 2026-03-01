@@ -244,6 +244,7 @@ impl Screen<'_> {
             title: config.title.clone(),
             keyboard: config.keyboard,
             command_overlay_style: config.command_overlay,
+            quick_terminal: config.quick_terminal,
         };
 
         let rich_text_id = sugarloaf.create_rich_text();
@@ -457,13 +458,15 @@ impl Screen<'_> {
         self.mouse
             .set_multiplier_and_divider(config.scroll.multiplier, config.scroll.divider);
 
-        // Update keyboard and command overlay config in context manager
+        // Update keyboard, command overlay, and quick terminal config
         self.context_manager.config.keyboard = config.keyboard;
         self.context_manager.config.command_overlay_style = config.command_overlay;
+        self.context_manager.config.quick_terminal = config.quick_terminal;
 
-        // Update command overlay style on all grids for hot-reload
+        // Update per-grid styles for hot-reload
         for context_grid in self.context_manager.contexts_mut() {
             context_grid.command_overlay_style = config.command_overlay;
+            context_grid.quick_terminal_config = config.quick_terminal;
 
             // Update font size on existing command overlays
             if config.command_overlay.has_custom_font_size() {

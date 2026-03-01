@@ -467,10 +467,7 @@ impl Sugarloaf<'_> {
                     self.rich_text_brush.render(&mut self.ctx, &mut rpass);
                 }
 
-                // Collect all overlay quads and render in a single pass.
-                // Using render_single for multiple overlays would clobber the shared
-                // instance buffer (queue.write_buffer is not ordered with encoder passes),
-                // so we batch them into one instanced draw call instead.
+                // --- Screen-wide overlays (cursor glow, vi mode, bell, etc.) ---
                 {
                     let mut overlay_quads: Vec<Quad> = Vec::new();
 

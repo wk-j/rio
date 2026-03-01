@@ -136,7 +136,7 @@ For features that spawn a PTY (like command overlays or quick terminal):
 
 1. **Build:** `cargo build -p rioterm` (dev) or `cargo build --release` (release)
 2. **Lint:** `cargo fmt -- --check && cargo clippy --all-targets --all-features -- -D warnings`
-3. **Test:** `cargo test --release` (all tests) or `cargo test -p <crate> <test_name>` (single)
+3. **Test:** See the `run-tests` skill. Use `cargo test` (no `--release`) for speed.
 4. **Visual:** If the CR involves rendering, run `make dev` and verify manually
 5. Walk through the CR's **Testing** section — it lists specific verification steps
 

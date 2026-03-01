@@ -124,6 +124,7 @@ pub struct ContextManagerConfig {
     pub title: rio_backend::config::title::Title,
     pub keyboard: rio_backend::config::keyboard::Keyboard,
     pub command_overlay_style: rio_backend::config::command_overlay::CommandOverlayStyle,
+    pub quick_terminal: rio_backend::config::quick_terminal::QuickTerminalConfig,
 }
 
 const DEFAULT_CONTEXT_CAPACITY: usize = 28;
@@ -389,6 +390,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                 margin,
                 ctx_config.split_color,
                 ctx_config.command_overlay_style,
+                ctx_config.quick_terminal,
             )],
             capacity: DEFAULT_CONTEXT_CAPACITY,
             event_proxy,
@@ -437,6 +439,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                 Delta::<f32>::default(),
                 config.split_color,
                 config.command_overlay_style,
+                config.quick_terminal,
             )],
             capacity,
             event_proxy,
@@ -1288,6 +1291,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
             title: config.title,
             keyboard: config.keyboard,
             command_overlay_style: config.command_overlay,
+            quick_terminal: config.quick_terminal,
         };
 
         let current = self.current();
@@ -1383,6 +1387,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                         previous_margin,
                         self.config.split_color,
                         self.config.command_overlay_style,
+                        self.config.quick_terminal,
                     ));
                     if redirect {
                         self.current_index = last_index;
