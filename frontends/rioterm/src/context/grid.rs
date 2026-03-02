@@ -1136,6 +1136,12 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
 
     #[inline]
     pub fn select_current_based_on_mouse(&mut self, mouse: &Mouse) -> bool {
+        // When the quick terminal is visible it owns focus — don't
+        // let clicks on the main pane steal it.
+        if self.is_quick_terminal_visible() {
+            return false;
+        }
+
         let len = self.inner.len();
         if len <= 1 {
             return false;
