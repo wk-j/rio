@@ -1,9 +1,10 @@
 use crate::context::Context;
 use crate::mouse::Mouse;
+use rio_backend::config::quick_terminal::QuickTerminalPosition;
 use rio_backend::crosswords::grid::Dimensions;
 use rio_backend::event::EventListener;
 use rio_backend::sugarloaf::{
-    layout::SugarDimensions, Object, Quad, RichText, RichTextLinesRange, Sugarloaf,
+    layout::SugarDimensions, Object, Quad, RichText, Sugarloaf,
 };
 use std::collections::HashMap;
 
@@ -329,9 +330,58 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         self.quick_terminal.as_ref().is_some_and(|qt| qt.visible)
     }
 
+    /// Compute the panel width, height, and position for the quick terminal
+    /// based on the configured position (top/bottom/left/right/center).
+    /// Returns `(panel_width, panel_height, [pos_x, pos_y])`.
+    fn qt_panel_geometry(&self, scale: f32) -> (f32, f32, [f32; 2]) {
+        let cfg = &self.quick_terminal_config;
+        let h_frac = cfg.height.clamp(0.1, 0.9);
+        let w_frac = cfg.width.clamp(0.1, 0.9);
+        let margin_x = self.margin.x * scale;
+        let margin_bottom = self.margin.bottom_y * scale;
+        let margin_top = self.margin.top_y * scale;
+        let min_px = 60.0 * scale;
+
+        match cfg.position {
+            QuickTerminalPosition::Bottom => {
+                let panel_h = (self.height * h_frac).max(min_px) - margin_bottom;
+                let panel_w = self.width - margin_x;
+                let pos_y = (self.height - panel_h) / scale - self.margin.bottom_y;
+                (panel_w, panel_h, [self.margin.x, pos_y])
+            }
+            QuickTerminalPosition::Top => {
+                let panel_h = (self.height * h_frac).max(min_px) - margin_top;
+                let panel_w = self.width - margin_x;
+                let pos_y = self.margin.top_y;
+                (panel_w, panel_h, [self.margin.x, pos_y])
+            }
+            QuickTerminalPosition::Left => {
+                let panel_w = (self.width * w_frac).max(min_px) - margin_x;
+                let panel_h = self.height - margin_top - margin_bottom;
+                let pos_x = self.margin.x;
+                let pos_y = self.margin.top_y;
+                (panel_w, panel_h, [pos_x, pos_y])
+            }
+            QuickTerminalPosition::Right => {
+                let panel_w = (self.width * w_frac).max(min_px) - margin_x;
+                let panel_h = self.height - margin_top - margin_bottom;
+                let pos_x = (self.width - panel_w) / scale - self.margin.x;
+                let pos_y = self.margin.top_y;
+                (panel_w, panel_h, [pos_x, pos_y])
+            }
+            QuickTerminalPosition::Center => {
+                let panel_h = (self.height * h_frac).max(min_px) - margin_bottom;
+                let panel_w = (self.width * w_frac).max(min_px) - margin_x;
+                let pos_x = (self.width / scale - panel_w / scale) / 2.0;
+                let pos_y = (self.height / scale - panel_h / scale) / 2.0;
+                (panel_w, panel_h, [pos_x, pos_y])
+            }
+        }
+    }
+
     /// Open the quick terminal with a pre-created context.
-    /// The QT is rendered as a floating 2D panel anchored to the bottom of the
-    /// window — main pane dimensions are untouched and remain visible above.
+    /// The QT is rendered as a floating 2D panel — main pane dimensions
+    /// are untouched and remain visible around it.
     pub fn open_quick_terminal(&mut self, context: Context<T>) {
         // Cancel zoom if active
         self.zoomed_key = None;
@@ -341,19 +391,11 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         // Create grid item
         let mut item = ContextGridItem::new(context);
 
-        // Size to the configured height fraction, full width (margins applied)
         let scale = item.val.dimension.dimension.scale;
-        let margin_x = self.margin.x * scale;
-        let margin_bottom = self.margin.bottom_y * scale;
-        let height_frac = self.quick_terminal_config.height.clamp(0.1, 0.9);
-        let panel_height = (self.height * height_frac).max(60.0 * scale) - margin_bottom;
-        let panel_width = self.width - margin_x;
-        item.val.dimension.update_width(panel_width);
-        item.val.dimension.update_height(panel_height);
-
-        // Anchor to the bottom of the window
-        let pos_y = (self.height - panel_height) / scale - self.margin.bottom_y;
-        item.set_position([self.margin.x, pos_y]);
+        let (panel_w, panel_h, pos) = self.qt_panel_geometry(scale);
+        item.val.dimension.update_width(panel_w);
+        item.val.dimension.update_height(panel_h);
+        item.set_position(pos);
 
         // Resize PTY to match the overlay dimensions
         let mut terminal = item.val.terminal.lock();
@@ -374,76 +416,117 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
 
     /// Toggle the quick terminal visibility.
     /// The QT is an overlay — main pane dimensions are never modified.
-    /// Returns true if the quick terminal needs to be created (caller should provide a context).
+    /// Returns true if the quick terminal needs to be created (caller
+    /// should provide a context).
     pub fn toggle_quick_terminal(&mut self) -> bool {
-        if let Some(ref mut qt) = self.quick_terminal {
-            if qt.visible {
-                // Hide: just restore focus, no dimension changes needed
-                qt.visible = false;
-                self.current = qt.saved_focus;
-            } else {
-                // Show: focus quick terminal, update its dimensions/position
-                self.zoomed_key = None;
-
-                qt.visible = true;
-                qt.saved_focus = self.current;
-                self.current = qt.item.val.route_id;
-
-                // Re-apply configured panel dimensions (window may have resized)
-                let scale = qt.item.val.dimension.dimension.scale;
-                let margin_x = self.margin.x * scale;
-                let margin_bottom = self.margin.bottom_y * scale;
-                let height_frac = self.quick_terminal_config.height.clamp(0.1, 0.9);
-                let panel_height =
-                    (self.height * height_frac).max(60.0 * scale) - margin_bottom;
-                let panel_width = self.width - margin_x;
-                qt.item.val.dimension.update_width(panel_width);
-                qt.item.val.dimension.update_height(panel_height);
-
-                let pos_y = (self.height - panel_height) / scale - self.margin.bottom_y;
-                qt.item.set_position([self.margin.x, pos_y]);
-
-                // Resize QT's own PTY
-                let mut terminal = qt.item.val.terminal.lock();
-                terminal.resize::<ContextDimension>(qt.item.val.dimension);
-                drop(terminal);
-                let winsize =
-                    crate::renderer::utils::terminal_dimensions(&qt.item.val.dimension);
-                let _ = qt.item.val.messenger.send_resize(winsize);
-            }
-            false
-        } else {
+        if self.quick_terminal.is_none() {
             // No quick terminal exists, caller needs to create one
-            true
+            return true;
         }
+
+        let qt = self.quick_terminal.as_ref().unwrap();
+        if qt.visible {
+            // Hide: just restore focus, no dimension changes needed
+            let saved = qt.saved_focus;
+            self.quick_terminal.as_mut().unwrap().visible = false;
+            self.current = saved;
+        } else {
+            // Read scale before mutable borrow
+            let scale = qt.item.val.dimension.dimension.scale;
+            let route_id = qt.item.val.route_id;
+            let (panel_w, panel_h, pos) = self.qt_panel_geometry(scale);
+
+            // Show: focus quick terminal, update its dimensions/position
+            self.zoomed_key = None;
+            let current = self.current;
+
+            let qt = self.quick_terminal.as_mut().unwrap();
+            qt.visible = true;
+            qt.saved_focus = current;
+            self.current = route_id;
+
+            qt.item.val.dimension.update_width(panel_w);
+            qt.item.val.dimension.update_height(panel_h);
+            qt.item.set_position(pos);
+
+            // Resize QT's own PTY
+            let mut terminal = qt.item.val.terminal.lock();
+            terminal.resize::<ContextDimension>(qt.item.val.dimension);
+            drop(terminal);
+            let winsize =
+                crate::renderer::utils::terminal_dimensions(&qt.item.val.dimension);
+            let _ = qt.item.val.messenger.send_resize(winsize);
+        }
+        false
     }
 
     /// Resize the quick terminal panel by the given pixel amount.
-    /// Positive = taller (panel top edge moves up), negative = shorter.
+    /// For top/bottom/center: positive = taller, negative = shorter.
+    /// For left/right: positive = wider, negative = narrower.
     /// Returns true if the resize was applied.
     pub fn resize_quick_terminal(&mut self, amount: f32) -> bool {
+        let position = self.quick_terminal_config.position;
         let qt = match self.quick_terminal {
             Some(ref mut qt) if qt.visible => qt,
             _ => return false,
         };
 
         let scale = qt.item.val.dimension.dimension.scale;
-        let margin_bottom = self.margin.bottom_y * scale;
-        let min_height = (self.height * 0.1).max(60.0 * scale);
-        let max_height = (self.height * 0.8) - margin_bottom;
-        let current_height = qt.item.val.dimension.height;
-        let new_height = (current_height + amount).clamp(min_height, max_height);
+        let min_px = 60.0 * scale;
 
-        if (new_height - current_height).abs() < 0.1 {
-            return false;
+        if position.is_horizontal() {
+            // Resize vertically (height)
+            let margin_bottom = self.margin.bottom_y * scale;
+            let min_h = (self.height * 0.1).max(min_px);
+            let max_h = (self.height * 0.8) - margin_bottom;
+            let cur = qt.item.val.dimension.height;
+            let new_h = (cur + amount).clamp(min_h, max_h);
+            if (new_h - cur).abs() < 0.1 {
+                return false;
+            }
+            qt.item.val.dimension.update_height(new_h);
+
+            // Re-anchor based on position
+            let pos = match position {
+                QuickTerminalPosition::Bottom => {
+                    let pos_y = (self.height - new_h) / scale - self.margin.bottom_y;
+                    [self.margin.x, pos_y]
+                }
+                QuickTerminalPosition::Top => [self.margin.x, self.margin.top_y],
+                QuickTerminalPosition::Center => {
+                    let cur_w = qt.item.val.dimension.width;
+                    let pos_x = (self.width / scale - cur_w / scale) / 2.0;
+                    let pos_y = (self.height / scale - new_h / scale) / 2.0;
+                    [pos_x, pos_y]
+                }
+                _ => unreachable!(),
+            };
+            qt.item.set_position(pos);
+        } else {
+            // Resize horizontally (width) for left/right
+            let margin_x = self.margin.x * scale;
+            let min_w = (self.width * 0.1).max(min_px);
+            let max_w = (self.width * 0.8) - margin_x;
+            let cur = qt.item.val.dimension.width;
+            let new_w = (cur + amount).clamp(min_w, max_w);
+            if (new_w - cur).abs() < 0.1 {
+                return false;
+            }
+            qt.item.val.dimension.update_width(new_w);
+
+            // Re-anchor based on position
+            let pos = match position {
+                QuickTerminalPosition::Left => [self.margin.x, self.margin.top_y],
+                QuickTerminalPosition::Right => {
+                    let pos_x = (self.width - new_w) / scale - self.margin.x;
+                    [pos_x, self.margin.top_y]
+                }
+                _ => unreachable!(),
+            };
+            qt.item.set_position(pos);
         }
 
-        // Update panel height and reanchor to bottom
-        qt.item.val.dimension.update_height(new_height);
-        let pos_y = (self.height - new_height) / scale - self.margin.bottom_y;
-        qt.item.set_position([self.margin.x, pos_y]);
-
-        // Resize PTY to match new panel height
+        // Resize PTY to match new panel size
         let mut terminal = qt.item.val.terminal.lock();
         terminal.resize::<ContextDimension>(qt.item.val.dimension);
         drop(terminal);
@@ -816,55 +899,15 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         }
     }
 
-    /// Compute the maximum number of lines to render for a main pane
-    /// item so that its cells do not overlap the quick terminal panel.
+    /// Compute line-range clip for a main-pane rich text item so that
+    /// its cells do not overlap the quick terminal panel.
     /// Returns `None` if no clipping is needed (QT hidden or no overlap).
-    fn qt_clip_lines_for_item(
-        &self,
-        item: &ContextGridItem<T>,
-    ) -> Option<RichTextLinesRange> {
-        let qt = self.quick_terminal.as_ref()?;
-        if !qt.visible {
-            return None;
-        }
-
-        let qt_top_y = qt.item.position()[1];
-        let item_y = item.position()[1];
-        if qt_top_y <= item_y {
-            // QT covers the entire item — show nothing
-            return Some(RichTextLinesRange { start: 0, end: 0 });
-        }
-
-        let dim = &item.val.dimension;
-        let scale = dim.dimension.scale;
-        if scale <= 0.0 || dim.dimension.height <= 0.0 || dim.line_height <= 0.0 {
-            return None;
-        }
-        let char_height = (dim.dimension.height / scale) * dim.line_height;
-        let available = qt_top_y - item_y;
-        let clip = (available / char_height).floor() as usize;
-        let total = dim.lines;
-
-        if clip >= total {
-            // No clipping needed — QT doesn't overlap this item
-            None
-        } else {
-            Some(RichTextLinesRange {
-                start: 0,
-                end: clip,
-            })
-        }
-    }
-
-    /// Clone the item's RichText object, applying QT clipping if needed.
+    /// Clone the item's RichText object.
+    /// Main-pane lines are NOT clipped when the QT is visible — the
+    /// QT's opaque cell backgrounds cover the overlapping area, matching
+    /// how command overlays work (see CR-009).
     fn clipped_rich_text_object(&self, item: &ContextGridItem<T>) -> Object {
-        let mut obj = item.rich_text_object.clone();
-        if let Some(clip) = self.qt_clip_lines_for_item(item) {
-            if let Object::RichText(ref mut rt) = obj {
-                rt.lines = Some(clip);
-            }
-        }
-        obj
+        item.rich_text_object.clone()
     }
 
     #[inline]
@@ -900,9 +943,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             self.plot_objects_clipped(target);
         }
 
-        // Quick terminal panel — background quad + rich text rendered
-        // in the main pass. QT cells have opaque backgrounds (via
-        // bg_opacity_override) so they cover the main pane cells.
+        // Quick terminal panel — background quad + rich text
         if let Some(ref qt) = self.quick_terminal {
             if qt.visible {
                 let cfg = &self.quick_terminal_config;
@@ -927,12 +968,12 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                     self.border_color
                 };
 
-                let r = cfg.border_radius;
+                let border_radius = cfg.position.border_radius(cfg.border_radius);
                 target.push(Object::Quad(Quad {
                     position: pos,
                     color: bg,
                     size: [panel_w, panel_h],
-                    border_radius: [r, r, 0.0, 0.0],
+                    border_radius,
                     border_color: bc,
                     border_width: cfg.border_width,
                     shadow_color: cfg.shadow_color,

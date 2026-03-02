@@ -9,8 +9,9 @@
 Implement a quick terminal overlay — a persistent PTY panel that floats over
 existing panes with a single keybinding. Inspired by iTerm2's Hotkey Window and
 Guake. Toggling the same key shows/hides the panel without destroying the shell
-session. The panel is anchored to the bottom of the window, leaving main panes
-fully visible above it. Appearance and geometry are fully configurable.
+session. The panel can be anchored to any edge of the window (top, bottom, left,
+right) or centered, leaving main panes fully visible around it. Appearance,
+position, and geometry are fully configurable.
 
 ## Motivation
 
@@ -27,8 +28,8 @@ fully visible above it. Appearance and geometry are fully configurable.
 
 ```
 1. User presses ToggleQuickTerminal binding (e.g. Ctrl+`)
-2. Floating panel slides up from the bottom (40% height by default)
-3. Main pane content stays visible above the panel
+2. Floating panel appears at the configured position (default: bottom, 40%)
+3. Main pane content stays visible around the panel
 4. User runs commands in the panel
 5. Press binding again → panel hides, focus returns to previous pane
 6. Press binding again → panel re-appears with the same shell, same history
@@ -37,8 +38,9 @@ fully visible above it. Appearance and geometry are fully configurable.
 9. Switching tab / creating split → panel auto-dismisses
 ```
 
-### Visual Example
+### Visual Examples
 
+#### Bottom (default)
 ```
 +--------------------------------------------------+
 | $ cargo build                                     |   ← main pane (visible)
@@ -52,8 +54,48 @@ fully visible above it. Appearance and geometry are fully configurable.
 +--------------------------------------------------+
 ```
 
-The panel has rounded top corners, a configurable border, and a drop shadow.
-Main pane content is rendered normally beneath it.
+#### Top (dropdown, Guake/Yakuake style)
+```
++--------------------------------------------------+
+|╭────────────────────────────────────────────────╮|   ← floating panel
+|| $ █                                            ||
+||                                                ||
+|╰────────────────────────────────────────────────╯|
++┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄+
+| $ cargo build                                     |   ← main pane (visible)
+|    Compiling rio v0.2.0                          |
+|    ...                                           |
++--------------------------------------------------+
+```
+
+#### Left / Right
+```
++------------------------+-------------------------+
+|╭──────────────────────╮| $ cargo build            |
+|| $ █                  ||    Compiling rio v0.2.0  |
+||                      ||    ...                   |
+||                      ||                          |
+||                      ||                          |
+|╰──────────────────────╯|                          |
++------------------------+-------------------------+
+         panel ↑                main pane ↑
+```
+
+#### Center
+```
++--------------------------------------------------+
+| $ cargo build                                     |
+|  ╭──────────────────────────────────────────╮     |
+|  │ $ █                                      │     |
+|  │                                          │     |
+|  ╰──────────────────────────────────────────╯     |
+|    ...                                           |
++--------------------------------------------------+
+```
+
+Corners that touch a window edge are sharp; interior corners are rounded.
+The panel has a configurable border and drop shadow. Main pane content is
+rendered normally around it.
 
 ## Architecture
 
@@ -61,8 +103,8 @@ Main pane content is rendered normally beneath it.
 
 ```rust
 /// State for the quick terminal overlay pane.
-/// The quick terminal is rendered as an overlay on top of main panes —
-/// main pane dimensions are never modified.
+/// The quick terminal is rendered as an overlay on top of main panes at the
+/// configured position — main pane dimensions are never modified.
 pub struct QuickTerminalState<T: EventListener> {
     /// The quick terminal's context item (outside the normal split tree)
     pub item: ContextGridItem<T>,
@@ -99,25 +141,47 @@ ContextManager::toggle_quick_terminal(rich_text_id)
 
 ### Panel Geometry
 
-The panel is sized using `QuickTerminalConfig::height` (a 0.0–1.0 fraction of
-window height, default 0.4), anchored to the bottom edge:
+The panel position is set via `QuickTerminalConfig::position` (default: `Bottom`).
+Two separate fields control sizing:
+- `height` (0.0–1.0 fraction, default 0.4) — fraction of window height
+- `width` (0.0–1.0 fraction, default 0.4) — fraction of window width
 
-```rust
-let height_frac = self.quick_terminal_config.height.clamp(0.1, 0.9);
-let panel_height = (self.height * height_frac).max(60.0 * scale) - margin_bottom;
-let panel_width  = self.width - margin_x;
-let pos_y        = (self.height - panel_height) / scale - self.margin.bottom_y;
-```
+All geometry is computed by `ContextGrid::qt_panel_geometry()`:
 
+| Position | Panel width | Panel height | Anchor |
+|----------|-------------|--------------|--------|
+| `bottom` | full width − margin | `height` × window height | Bottom edge |
+| `top` | full width − margin | `height` × window height | Top edge |
+| `left` | `width` × window width | full height − margins | Left edge |
+| `right` | `width` × window width | full height − margins | Right edge |
+| `center` | `width` × window width | `height` × window height | Centered |
+
+Minimum panel size is 60 scaled pixels on the relevant axis.
 Main pane dimensions are never modified — the panel is a pure visual overlay.
+
+### Border Radius Per Position
+
+`QuickTerminalPosition::border_radius(r)` returns the corner radii array,
+rounding only the corners that do not touch a window edge:
+
+| Position | top-left | top-right | bottom-right | bottom-left |
+|----------|----------|-----------|--------------|-------------|
+| `bottom` | r | r | 0 | 0 |
+| `top` | 0 | 0 | r | r |
+| `left` | 0 | r | r | 0 |
+| `right` | r | 0 | 0 | r |
+| `center` | r | r | r | r |
 
 ### Resize
 
-The divider resize actions (`MoveDividerUp` / `MoveDividerDown`) are intercepted
-in `screen/mod.rs` when the QT is visible and forwarded to
-`resize_quick_terminal(±20.0)`. The new height is reclamped and the panel is
-reanchored from the bottom. Clamped between 10%–80% of window height (or 60px
-minimum).
+For horizontal positions (top/bottom/center), `MoveDividerUp` / `MoveDividerDown`
+are intercepted and forwarded to `resize_quick_terminal(±20.0)` which adjusts the
+panel height. For vertical positions (left/right), `MoveDividerLeft` /
+`MoveDividerRight` adjust the panel width instead.
+
+The resized dimension is clamped between 10%–80% of the relevant window axis
+(or 60px minimum). After resizing, the panel is reanchored to its configured
+edge (or recentered for the center position).
 
 ### Rendering
 
@@ -134,8 +198,8 @@ The QT `RichText` is always rendered with `TerminalDamage::Full` and
 `bg_opacity_override = Some(config.opacity)` so default-background cells use the
 configured opacity.
 
-Panel background quad uses `border_radius: [r, r, 0.0, 0.0]` — only the top
-corners are rounded; the bottom corners stay flush with the window edge.
+Panel background quad uses position-dependent border radii — corners touching
+a window edge are sharp, interior corners are rounded (see table above).
 
 ### Dismissal Sites
 
@@ -176,8 +240,17 @@ keys = [
 
 ```toml
 [quick-terminal]
+# Panel position: "top", "bottom", "left", "right", or "center". Default: "bottom"
+position = "bottom"
+
 # Panel height as a fraction of window height (0.1–0.9). Default: 0.4
+# Used by top, bottom, and center positions.
 height = 0.4
+
+# Panel width as a fraction of window width (0.1–0.9). Default: 0.4
+# Used by left, right, and center positions.
+# For top/bottom the panel always spans the full window width.
+width = 0.4
 
 # Background opacity (0.0 = transparent, 1.0 = opaque). Default: 1.0
 opacity = 1.0
@@ -218,13 +291,13 @@ without restarting.
 
 | File | Changes |
 |------|---------|
-| `rio-backend/src/config/quick_terminal.rs` | New: `QuickTerminalConfig` struct with all panel appearance fields and defaults |
+| `rio-backend/src/config/quick_terminal.rs` | New: `QuickTerminalPosition` enum (Top/Bottom/Left/Right/Center) with `border_radius()` / `is_horizontal()` / `is_vertical()` helpers; `QuickTerminalConfig` struct with `position` field and all panel appearance fields and defaults |
 | `rio-backend/src/config/mod.rs` | Register `pub mod quick_terminal`, import type, add `quick_terminal` field to `Config` and `Config::default()` |
-| `frontends/rioterm/src/context/grid.rs` | `QuickTerminalState<T>`, `ContextGrid::quick_terminal_config` field, geometry from config in `open_quick_terminal()` / `toggle_quick_terminal()`, config-driven panel quad in `extend_with_objects()`, clamp in `resize_quick_terminal()`, focus routing, dismiss on resize |
+| `frontends/rioterm/src/context/grid.rs` | `QuickTerminalState<T>`, `ContextGrid::quick_terminal_config` field, `qt_panel_geometry()` helper for position-aware sizing/anchoring, `open_quick_terminal()` / `toggle_quick_terminal()` use geometry helper, `resize_quick_terminal()` supports vertical resize (top/bottom/center) and horizontal resize (left/right), position-aware `border_radius` in `extend_with_objects()`, position-aware line clipping in `qt_clip_lines_for_item()`, focus routing, dismiss on resize |
 | `frontends/rioterm/src/context/mod.rs` | `quick_terminal` field on `ContextManagerConfig`, pass through all `ContextGrid::new()` call sites (×3), `toggle_quick_terminal()`, `dismiss_quick_terminal()`, PTY exit handling |
 | `frontends/rioterm/src/renderer/mod.rs` | Removed main-pane clear loop (panes stay visible), `qt_bg_opacity` from config, QT content render block |
 | `frontends/rioterm/src/renderer/navigation.rs` | Tab bar active-tab suppression when `qt_visible` |
-| `frontends/rioterm/src/screen/mod.rs` | `ToggleQuickTerminal` dispatch (×2), `MoveDivider{Up,Down}` intercept, initial config wiring, hot-reload sync |
+| `frontends/rioterm/src/screen/mod.rs` | `ToggleQuickTerminal` dispatch (×2), `MoveDivider{Up,Down}` intercept for horizontal QT, `MoveDivider{Left,Right}` intercept for vertical QT, initial config wiring, hot-reload sync |
 | `frontends/rioterm/src/bindings/mod.rs` | `Action::ToggleQuickTerminal` variant, `"togglequickterminal"` config string parser |
 
 ## References

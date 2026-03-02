@@ -1348,33 +1348,55 @@ impl Screen<'_> {
                     }
                     Act::MoveDividerUp => {
                         let grid = self.context_manager.current_grid_mut();
-                        if grid.is_quick_terminal_visible() {
-                            // Move divider up = quick terminal gets taller
+                        if grid.is_quick_terminal_visible()
+                            && grid.quick_terminal_config.position.is_horizontal()
+                        {
+                            // Horizontal QT: move divider up = taller
                             if grid.resize_quick_terminal(20.0) {
                                 self.render();
                             }
                         } else {
-                            // User wants divider to move up visually, which means expanding the bottom split
                             self.move_divider_down();
                         }
                     }
                     Act::MoveDividerDown => {
                         let grid = self.context_manager.current_grid_mut();
-                        if grid.is_quick_terminal_visible() {
-                            // Move divider down = quick terminal gets shorter
+                        if grid.is_quick_terminal_visible()
+                            && grid.quick_terminal_config.position.is_horizontal()
+                        {
+                            // Horizontal QT: move divider down = shorter
                             if grid.resize_quick_terminal(-20.0) {
                                 self.render();
                             }
                         } else {
-                            // User wants divider to move down visually, which means expanding the top split
                             self.move_divider_up();
                         }
                     }
                     Act::MoveDividerLeft => {
-                        self.move_divider_left();
+                        let grid = self.context_manager.current_grid_mut();
+                        if grid.is_quick_terminal_visible()
+                            && grid.quick_terminal_config.position.is_vertical()
+                        {
+                            // Vertical QT: move divider left = narrower
+                            if grid.resize_quick_terminal(-20.0) {
+                                self.render();
+                            }
+                        } else {
+                            self.move_divider_left();
+                        }
                     }
                     Act::MoveDividerRight => {
-                        self.move_divider_right();
+                        let grid = self.context_manager.current_grid_mut();
+                        if grid.is_quick_terminal_visible()
+                            && grid.quick_terminal_config.position.is_vertical()
+                        {
+                            // Vertical QT: move divider right = wider
+                            if grid.resize_quick_terminal(20.0) {
+                                self.render();
+                            }
+                        } else {
+                            self.move_divider_right();
+                        }
                     }
                     Act::ToggleZoom => {
                         self.context_manager.current_grid_mut().toggle_zoom();

@@ -1434,8 +1434,11 @@ impl Renderer {
             }
         }
 
-        // Render quick terminal content if visible
-        let qt_bg_opacity = grid.quick_terminal_config.opacity;
+        // Render quick terminal content if visible.
+        // Cell backgrounds use the panel opacity so they fully cover
+        // main-pane cell backgrounds rendered earlier in the same pass
+        // (all quads render before all rich texts in sugarloaf).
+        let qt_opacity = grid.quick_terminal_config.opacity;
         if let Some(ref mut qt) = grid.quick_terminal {
             if qt.visible {
                 let is_active = qt.item.val.route_id == active_key;
@@ -1498,7 +1501,7 @@ impl Renderer {
                         &None, // no focused match
                         &terminal_snapshot.colors,
                         is_active,
-                        Some(qt_bg_opacity),
+                        Some(qt_opacity),
                     );
                 }
                 content.build();
@@ -1970,7 +1973,6 @@ impl Renderer {
         sugarloaf.set_progress_bar(progress_bar);
 
         sugarloaf.set_objects(objects);
-
         // Apply background color from current context if changed
         let current_context = context_manager.current_grid_mut().current_mut();
         let window_update = if let Some(bg_state) =

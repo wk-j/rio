@@ -1,16 +1,98 @@
 use crate::config::colors::deserialize_to_arr;
 use crate::config::colors::ColorArray;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Position of the quick terminal panel within the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QuickTerminalPosition {
+    /// Panel anchored to the top edge (dropdown style, like Guake/Yakuake).
+    Top,
+    /// Panel anchored to the bottom edge (default).
+    Bottom,
+    /// Panel anchored to the left edge.
+    Left,
+    /// Panel anchored to the right edge.
+    Right,
+    /// Panel centered in the window.
+    Center,
+}
+
+impl Default for QuickTerminalPosition {
+    fn default() -> Self {
+        QuickTerminalPosition::Bottom
+    }
+}
+
+impl fmt::Display for QuickTerminalPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            QuickTerminalPosition::Top => write!(f, "top"),
+            QuickTerminalPosition::Bottom => write!(f, "bottom"),
+            QuickTerminalPosition::Left => write!(f, "left"),
+            QuickTerminalPosition::Right => write!(f, "right"),
+            QuickTerminalPosition::Center => write!(f, "center"),
+        }
+    }
+}
+
+impl QuickTerminalPosition {
+    /// Returns true if the panel is oriented horizontally (top/bottom/center).
+    /// These positions span the full window width (or use `width` for center)
+    /// and use `height` for the vertical dimension.
+    #[inline]
+    pub fn is_horizontal(&self) -> bool {
+        matches!(
+            self,
+            QuickTerminalPosition::Top
+                | QuickTerminalPosition::Bottom
+                | QuickTerminalPosition::Center
+        )
+    }
+
+    /// Returns true if the panel is oriented vertically (left/right).
+    /// These positions span the full window height and use `width`
+    /// for the horizontal dimension.
+    #[inline]
+    pub fn is_vertical(&self) -> bool {
+        matches!(
+            self,
+            QuickTerminalPosition::Left | QuickTerminalPosition::Right
+        )
+    }
+
+    /// Returns the border-radius array [top-left, top-right, bottom-right, bottom-left]
+    /// for this position. Corners that touch the window edge are set to 0.0.
+    #[inline]
+    pub fn border_radius(&self, r: f32) -> [f32; 4] {
+        match self {
+            // Bottom: rounded top corners, flat bottom
+            QuickTerminalPosition::Bottom => [r, r, 0.0, 0.0],
+            // Top: flat top, rounded bottom corners
+            QuickTerminalPosition::Top => [0.0, 0.0, r, r],
+            // Left: flat left corners, rounded right corners
+            QuickTerminalPosition::Left => [0.0, r, r, 0.0],
+            // Right: rounded left corners, flat right corners
+            QuickTerminalPosition::Right => [r, 0.0, 0.0, r],
+            // Center: all corners rounded
+            QuickTerminalPosition::Center => [r, r, r, r],
+        }
+    }
+}
 
 /// Configuration for the quick terminal overlay panel.
 ///
-/// The quick terminal is a persistent floating panel anchored to the bottom
-/// of the window, toggled with the `ToggleQuickTerminal` keybinding.
+/// The quick terminal is a persistent floating panel that can be anchored
+/// to any edge of the window or centered, toggled with the
+/// `ToggleQuickTerminal` keybinding.
 ///
 /// TOML configuration example:
 /// ```toml
 /// [quick-terminal]
+/// position = "bottom"
 /// height = 0.4
+/// width = 0.4
 /// opacity = 1.0
 /// border-radius = 6.0
 /// border-width = 1.0
@@ -21,10 +103,23 @@ use serde::{Deserialize, Serialize};
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct QuickTerminalConfig {
-    /// Height of the panel as a fraction of window height (0.0–1.0).
-    /// Default: 0.4 (40% of the window).
+    /// Position of the panel within the window.
+    /// Default: "bottom" (anchored to the bottom edge).
+    #[serde(default)]
+    pub position: QuickTerminalPosition,
+
+    /// Panel height as a fraction of window height (0.0–1.0).
+    /// Used by top, bottom, and center positions.
+    /// Default: 0.4 (40% of the window height).
     #[serde(default = "default_qt_height")]
     pub height: f32,
+
+    /// Panel width as a fraction of window width (0.0–1.0).
+    /// Used by left, right, and center positions.
+    /// For top/bottom the panel always spans the full window width.
+    /// Default: 0.4 (40% of the window width).
+    #[serde(default = "default_qt_width")]
+    pub width: f32,
 
     /// Opacity of the panel background (0.0 = fully transparent, 1.0 = opaque).
     /// Default: 1.0.
@@ -87,6 +182,11 @@ fn default_qt_height() -> f32 {
 }
 
 #[inline]
+fn default_qt_width() -> f32 {
+    0.4
+}
+
+#[inline]
 fn default_qt_opacity() -> f32 {
     1.0
 }
@@ -131,7 +231,9 @@ fn default_qt_shadow_offset() -> [f32; 2] {
 impl Default for QuickTerminalConfig {
     fn default() -> Self {
         QuickTerminalConfig {
+            position: QuickTerminalPosition::default(),
             height: default_qt_height(),
+            width: default_qt_width(),
             opacity: default_qt_opacity(),
             border_radius: default_qt_border_radius(),
             border_width: default_qt_border_width(),
