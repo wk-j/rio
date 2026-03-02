@@ -944,10 +944,12 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         if let Some(ref qt) = self.quick_terminal {
             if qt.visible {
                 let cfg = &self.quick_terminal_config;
-                let scale = qt.item.val.dimension.dimension.scale;
+                let dim = &qt.item.val.dimension;
+                let scale = dim.dimension.scale;
                 let pos = qt.item.position();
-                let panel_w = qt.item.val.dimension.width / scale;
-                let panel_h = qt.item.val.dimension.height / scale;
+
+                let panel_w = dim.width / scale;
+                let panel_h = dim.height / scale;
 
                 let bg = if cfg.has_custom_background() {
                     let mut c = cfg.background_color;
@@ -1083,7 +1085,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 let margin = Delta {
                     x: pos[0] + self.scaled_padding,
                     top_y: pos[1] + self.scaled_padding,
-                    bottom_y: self.margin.bottom_y,
+                    bottom_y: qt.item.val.dimension.margin.bottom_y,
                 };
                 return (&qt.item.val, margin);
             }

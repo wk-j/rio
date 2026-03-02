@@ -1099,11 +1099,17 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
             let cursor = current.cursor_from_ref();
             let current_dim = current.dimension;
 
-            // Build dimension matching the main pane size (accounting for margins)
-            // so the PTY is spawned with correct rows from the start
+            // Build dimension with a small internal margin so text
+            // doesn't touch the panel border, but no window-level
+            // padding that would create a visible gap.
             let scale = current_dim.dimension.scale;
-            let margin_x = grid.margin.x * scale;
-            let margin_y = (grid.margin.top_y + grid.margin.bottom_y) * scale;
+            let qt_margin = Delta {
+                x: grid.scaled_padding() / scale,
+                top_y: grid.scaled_padding() / scale,
+                bottom_y: grid.scaled_padding() / scale,
+            };
+            let margin_x = qt_margin.x * scale;
+            let margin_y = (qt_margin.top_y + qt_margin.bottom_y) * scale;
             let qt_width = grid.width - margin_x;
             let qt_height = grid.height - margin_y;
             let dimension = ContextDimension::build(
@@ -1111,7 +1117,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
                 qt_height,
                 current_dim.dimension,
                 current_dim.line_height,
-                grid.margin,
+                qt_margin,
             );
 
             match ContextManager::create_context(
