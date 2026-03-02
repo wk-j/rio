@@ -1203,6 +1203,21 @@ impl Renderer {
                     continue;
                 }
             }
+
+            // When the quick terminal is visible, clear main pane rich
+            // text so its cell backgrounds and glyphs don't render on
+            // top of the QT content.
+            if qt_visible {
+                let ctx = grid_context.context_mut();
+                let rt_id = ctx.rich_text_id;
+                let content = sugarloaf.content();
+                content.sel(rt_id);
+                content.clear();
+                content.build();
+                ctx.renderable_content.pending_update.reset();
+                continue;
+            }
+
             let is_active = &active_key == key;
             let context = grid_context.context_mut();
 
