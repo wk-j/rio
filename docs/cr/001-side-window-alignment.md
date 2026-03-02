@@ -227,9 +227,9 @@ keyboard-only-focus = true # bool, default false — only change layout via keyb
 
 ### 7. Platform Notes
 
-**macOS:** `get_available_screen_area()` uses `CGDisplay::main()` from the `core-graphics` crate instead of `current_monitor()`. The winit/objc2-foundation `NSScreen` enumeration crashes due to `NSEnumerator` type mismatch. Core Graphics returns logical points directly.
+**macOS:** `get_available_screen_area()` uses `CGDisplay::main()` from the `core-graphics` crate for full display bounds, then queries `[NSScreen mainScreen].visibleFrame` via the `objc` crate to determine the actual menu bar height at runtime. This correctly handles auto-hidden menu bars (returns 0, so no gap is wasted), notch displays (37pt), and standard menu bars (25pt). The previous approach used a hardcoded 25pt offset which left a gap when the menu bar was set to auto-hide.
 
-**Cargo dependency:** `core-graphics = "0.24.0"` added under `[target.'cfg(target_os = "macos")'.dependencies]` in `frontends/rioterm/Cargo.toml`.
+**Cargo dependencies:** `core-graphics = "0.24.0"` and `objc` (workspace) added under `[target.'cfg(target_os = "macos")'.dependencies]` in `frontends/rioterm/Cargo.toml`.
 
 ## Visual Example
 

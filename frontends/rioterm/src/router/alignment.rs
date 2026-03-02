@@ -5,15 +5,44 @@ use rustc_hash::FxHashMap;
 
 use super::Route;
 
-/// Approximate menu bar height in logical points.
-/// On macOS this accounts for the menu bar subtracted by
-/// `get_available_screen_area`. `apply_stack_layout` reverses
-/// this offset for wallpaper-back windows that cover the full
-/// display including the menu bar area.
+/// Actual menu bar height in logical points, detected at runtime.
+///
+/// On macOS this is computed by comparing `NSScreen.frame` (full
+/// display) with `NSScreen.visibleFrame` (usable area excluding
+/// the menu bar and the dock). When the menu bar is set to
+/// auto-hide, `visibleFrame` returns the full height so this
+/// value is 0 — no gap is wasted.
+///
+/// `apply_stack_layout` uses this to reverse the offset for
+/// wallpaper-back windows that cover the full display.
 #[cfg(target_os = "macos")]
-const MENU_BAR_HEIGHT: u32 = 25;
+fn get_menu_bar_height() -> u32 {
+    use objc::runtime::{Class, Object};
+    use objc::{msg_send, sel, sel_impl};
+
+    unsafe {
+        let ns_screen_class = Class::get("NSScreen").expect("NSScreen class not found");
+        let main_screen: *const Object = msg_send![ns_screen_class, mainScreen];
+        if main_screen.is_null() {
+            return 25; // fallback
+        }
+        let frame: core_graphics::geometry::CGRect = msg_send![main_screen, frame];
+        let visible: core_graphics::geometry::CGRect =
+            msg_send![main_screen, visibleFrame];
+        // The menu bar sits at the top. In Cocoa coordinates (origin
+        // at bottom-left), the menu bar height is the difference
+        // between the full frame top and the visible frame top.
+        let frame_top = frame.origin.y + frame.size.height;
+        let visible_top = visible.origin.y + visible.size.height;
+        let menu_bar = (frame_top - visible_top).max(0.0) as u32;
+        menu_bar
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
-const MENU_BAR_HEIGHT: u32 = 0;
+fn get_menu_bar_height() -> u32 {
+    0
+}
 
 /// Represents the usable screen area.
 #[derive(Debug, Clone, Copy)]
@@ -35,9 +64,10 @@ pub struct WindowSlot {
 
 /// Get the available screen area for the main display.
 ///
-/// On macOS, uses `CGDisplay::main()` via Core Graphics to avoid
-/// the NSScreen enumeration crash in objc2-foundation, then adjusts
-/// for the menu bar by subtracting a fixed offset from the top.
+/// On macOS, uses `CGDisplay::main()` via Core Graphics for display
+/// bounds, then queries `NSScreen.visibleFrame` via the `objc` crate
+/// to get the actual menu bar height. This correctly handles
+/// auto-hidden menu bars (height = 0) and notch displays (37pt).
 /// On other platforms, uses `current_monitor()` with a fallback.
 pub fn get_available_screen_area(
     _window: &rio_window::window::Window,
@@ -53,15 +83,14 @@ pub fn get_available_screen_area(
         if width == 0 || height == 0 {
             return None;
         }
-        // Approximate the menu bar height (25pt standard, up to 37pt on
-        // notch displays). This avoids using NSScreen which can crash
-        // during enumeration. The decoration-height logic in apply_layout
-        // handles the remaining adjustments.
+        // Query the actual menu bar height at runtime via
+        // NSScreen.visibleFrame so auto-hidden menu bars report 0.
+        let menu_bar_height = get_menu_bar_height();
         Some(ScreenArea {
             x: bounds.origin.x as i32,
-            y: bounds.origin.y as i32 + MENU_BAR_HEIGHT as i32,
+            y: bounds.origin.y as i32 + menu_bar_height as i32,
             width,
-            height: height.saturating_sub(MENU_BAR_HEIGHT),
+            height: height.saturating_sub(menu_bar_height),
         })
     }
     #[cfg(not(target_os = "macos"))]
@@ -350,13 +379,14 @@ pub fn apply_stack_layout(
     // full display including the menu bar area. The `screen` passed
     // in has the menu bar already subtracted, so we reverse that
     // adjustment to get the raw display origin and height.
+    let menu_bar = get_menu_bar_height();
     let back_y = if wallpaper_back {
-        screen.y - MENU_BAR_HEIGHT as i32
+        screen.y - menu_bar as i32
     } else {
         base_y
     };
     let back_h = if wallpaper_back {
-        (screen.height + MENU_BAR_HEIGHT).saturating_sub(decoration_height)
+        (screen.height + menu_bar).saturating_sub(decoration_height)
     } else {
         full_h
     };
