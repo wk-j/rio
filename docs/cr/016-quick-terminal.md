@@ -185,18 +185,29 @@ edge (or recentered for the center position).
 
 ### Rendering
 
-Main panes render normally at all times — the QT is a 2D layer on top, not a
-replacement. The object list for a frame is:
+Main panes render all their lines at all times — the QT is a visual overlay,
+not a replacement. Sugarloaf renders ALL quads first, then ALL rich texts in
+a single GPU render pass. The object list for a frame is:
 
 ```
-[main pane quads + RichTexts]   ← rendered first, visible above panel
-[QT background Quad]            ← rounded top corners, border, drop shadow
-[QT RichText]                   ← terminal content rendered on top
+[main pane RichText]     ← object added first
+[QT background Quad]     ← rounded corners, border, drop shadow
+[QT RichText]            ← terminal content
+
+GPU draw order (within one render pass):
+  1. All Quads  (main pane border quads, QT panel Quad)
+  2. All RichTexts (main pane cells, then QT cells on top)
 ```
 
-The QT `RichText` is always rendered with `TerminalDamage::Full` and
-`bg_opacity_override = Some(config.opacity)` so default-background cells use the
-configured opacity.
+Because all quads render before all rich texts, the main pane's cell backgrounds
+render AFTER the QT panel Quad — covering the area where the QT sits. The QT's
+cell backgrounds then render on top, covering the main pane's cells in the
+overlapping region. This is the same approach used by command overlays (CR-009).
+
+Main-pane lines are **not** clipped when the QT is visible. The QT `RichText`
+is always rendered with `TerminalDamage::Full` and
+`bg_opacity_override = Some(config.opacity)` so default-background cells are
+opaque and fully cover whatever is underneath.
 
 Panel background quad uses position-dependent border radii — corners touching
 a window edge are sharp, interior corners are rounded (see table above).
@@ -291,14 +302,23 @@ without restarting.
 
 | File | Changes |
 |------|---------|
-| `rio-backend/src/config/quick_terminal.rs` | New: `QuickTerminalPosition` enum (Top/Bottom/Left/Right/Center) with `border_radius()` / `is_horizontal()` / `is_vertical()` helpers; `QuickTerminalConfig` struct with `position` field and all panel appearance fields and defaults |
+| `rio-backend/src/config/quick_terminal.rs` | `QuickTerminalPosition` enum (Top/Bottom/Left/Right/Center) with `border_radius()` / `is_horizontal()` / `is_vertical()` helpers; `QuickTerminalConfig` struct with `position` and `width` fields plus all panel appearance fields and defaults |
 | `rio-backend/src/config/mod.rs` | Register `pub mod quick_terminal`, import type, add `quick_terminal` field to `Config` and `Config::default()` |
-| `frontends/rioterm/src/context/grid.rs` | `QuickTerminalState<T>`, `ContextGrid::quick_terminal_config` field, `qt_panel_geometry()` helper for position-aware sizing/anchoring, `open_quick_terminal()` / `toggle_quick_terminal()` use geometry helper, `resize_quick_terminal()` supports vertical resize (top/bottom/center) and horizontal resize (left/right), position-aware `border_radius` in `extend_with_objects()`, position-aware line clipping in `qt_clip_lines_for_item()`, focus routing, dismiss on resize |
+| `frontends/rioterm/src/context/grid.rs` | `QuickTerminalState<T>`, `ContextGrid::quick_terminal_config` field, `qt_panel_geometry()` helper for position-aware sizing/anchoring, `open_quick_terminal()` / `toggle_quick_terminal()` use geometry helper, `resize_quick_terminal()` supports vertical resize (top/bottom/center) and horizontal resize (left/right), position-aware `border_radius` in `extend_with_objects()`, no main-pane line clipping (QT opaque backgrounds cover overlapping content, matching CR-009), focus routing, dismiss on resize |
 | `frontends/rioterm/src/context/mod.rs` | `quick_terminal` field on `ContextManagerConfig`, pass through all `ContextGrid::new()` call sites (×3), `toggle_quick_terminal()`, `dismiss_quick_terminal()`, PTY exit handling |
-| `frontends/rioterm/src/renderer/mod.rs` | Removed main-pane clear loop (panes stay visible), `qt_bg_opacity` from config, QT content render block |
+| `frontends/rioterm/src/renderer/mod.rs` | Main panes render all lines (no clipping), `qt_opacity` from config used as `bg_opacity_override` so QT cell backgrounds are opaque and cover main-pane content, QT content render block |
 | `frontends/rioterm/src/renderer/navigation.rs` | Tab bar active-tab suppression when `qt_visible` |
 | `frontends/rioterm/src/screen/mod.rs` | `ToggleQuickTerminal` dispatch (×2), `MoveDivider{Up,Down}` intercept for horizontal QT, `MoveDivider{Left,Right}` intercept for vertical QT, initial config wiring, hot-reload sync |
 | `frontends/rioterm/src/bindings/mod.rs` | `Action::ToggleQuickTerminal` variant, `"togglequickterminal"` config string parser |
+
+## Dependencies
+
+- CR-009 (Command Overlay Panel) — rendering approach: overlay objects (Quad +
+  RichText) are added to the same object list as main pane objects. Sugarloaf
+  renders all quads then all rich texts in one pass. The overlay's opaque cell
+  backgrounds cover main-pane content in the overlapping region. No main-pane
+  line clipping is used.
+- Sugarloaf `Quad` primitive (border, shadow, rounded corners)
 
 ## References
 

@@ -899,9 +899,6 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         }
     }
 
-    /// Compute line-range clip for a main-pane rich text item so that
-    /// its cells do not overlap the quick terminal panel.
-    /// Returns `None` if no clipping is needed (QT hidden or no overlap).
     /// Clone the item's RichText object.
     /// Main-pane lines are NOT clipped when the QT is visible — the
     /// QT's opaque cell backgrounds cover the overlapping area, matching
