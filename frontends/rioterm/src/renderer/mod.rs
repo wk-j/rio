@@ -286,10 +286,10 @@ fn compute_quick_terminal_border_glow(
     }
 
     // Resolve color: use quick_terminal_color if set, else fall back to color.
-    let color_str = config
-        .quick_terminal_color
-        .as_deref()
-        .unwrap_or(&config.color);
+    // When quick_terminal_color is explicitly set, it pins the QT glow to that
+    // fixed color and bypasses the rainbow animation (the window glow still animates).
+    let qt_color_override = config.quick_terminal_color.as_deref();
+    let color_str = qt_color_override.unwrap_or(&config.color);
     let color_rgb = {
         let arr = rio_backend::config::colors::hex_to_color_arr(color_str);
         [arr[0], arr[1], arr[2]]
@@ -305,11 +305,17 @@ fn compute_quick_terminal_border_glow(
         BorderGlowAnimate::Rainbow => config.glow_intensity,
     };
 
-    let color = match config.animate {
-        BorderGlowAnimate::Rainbow => {
-            hsl_to_rgb((elapsed * config.animate_speed * 60.0) % 360.0, 0.8, 0.6)
+    // If quick_terminal_color is explicitly set, use it as a fixed color (no rainbow).
+    // Otherwise follow the animation mode.
+    let color = if qt_color_override.is_some() {
+        color_rgb
+    } else {
+        match config.animate {
+            BorderGlowAnimate::Rainbow => {
+                hsl_to_rgb((elapsed * config.animate_speed * 60.0) % 360.0, 0.8, 0.6)
+            }
+            _ => color_rgb,
         }
-        _ => color_rgb,
     };
 
     let w = config.width;
