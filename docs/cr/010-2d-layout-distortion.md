@@ -794,54 +794,98 @@ if let Some(ref mut filters_brush) = self.filters_brush {
 }
 ```
 
-### 8. Renderer Integration — `frontends/rioterm/src/renderer/mod.rs`
+### 8. Screen Integration — `frontends/rioterm/src/screen/mod.rs`
 
-Update the renderer to pass distortion params to sugarloaf each frame. For
-animated effects, the time value must be updated every frame:
+The `Screen` struct owns the `Sugarloaf` instance and the config, making it
+the natural place to convert `DistortionConfig` into GPU params and call
+`sugarloaf.update_distortion()`.
+
+**Important — time precision:** Animation time must be computed relative to
+an `Instant` recorded at screen creation, **not** from
+`SystemTime::UNIX_EPOCH`. The UNIX epoch timestamp (~1.74 billion seconds)
+exceeds `f32` mantissa precision (~7 decimal digits), making the smallest
+representable step ~128 seconds — effectively freezing the animation.
+`Instant::elapsed().as_secs_f32()` starts near zero and stays precise for
+hours.
 
 ```rust
-// frontends/rioterm/src/renderer/mod.rs — inside run()
+// frontends/rioterm/src/screen/mod.rs
 
-use sugarloaf::components::distortion::{
-    DistortionParams, DISTORTION_BARREL,
-    DISTORTION_FISHEYE, DISTORTION_NONE,
-    DISTORTION_PERSPECTIVE, DISTORTION_WAVE,
-};
+pub struct Screen<'screen> {
+    // ... existing fields ...
+    distortion_config: DistortionConfig,
+    distortion_start: std::time::Instant,  // NEW
+}
 
-// Convert config enum to GPU constant
-let distortion_type = match config.distortion.effect {
-    DistortionType::None => DISTORTION_NONE,
-    DistortionType::Barrel => DISTORTION_BARREL,
-    DistortionType::Perspective => DISTORTION_PERSPECTIVE,
-    DistortionType::Wave => DISTORTION_WAVE,
-    DistortionType::Fisheye => DISTORTION_FISHEYE,
-};
+/// Convert config to GPU params. Uses relative time
+/// from `start` for f32-safe animation.
+fn distortion_params_from_config(
+    config: &Config,
+    start: std::time::Instant,
+) -> DistortionParams {
+    let distortion_type = match config.distortion.effect {
+        DistortionType::None => DISTORTION_NONE,
+        DistortionType::Barrel => DISTORTION_BARREL,
+        DistortionType::Perspective => DISTORTION_PERSPECTIVE,
+        DistortionType::Wave => DISTORTION_WAVE,
+        DistortionType::Fisheye => DISTORTION_FISHEYE,
+    };
 
-let time = if config.distortion.animated {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs_f32()
-} else {
-    0.0
-};
+    let time = if config.distortion.animated {
+        start.elapsed().as_secs_f32()
+    } else {
+        0.0
+    };
 
-sugarloaf.update_distortion(DistortionParams {
-    distortion_type,
-    strength: config.distortion.strength,
-    center: config.distortion.center,
-    time,
-    speed: config.distortion.speed,
-    _padding: [0.0; 2],
-});
+    DistortionParams {
+        distortion_type,
+        strength: config.distortion.strength,
+        center: config.distortion.center,
+        time,
+        speed: config.distortion.speed,
+        _padding: [0.0; 2],
+    }
+}
 ```
 
-### 9. Config Hot-Reload — `frontends/rioterm/src/screen/mod.rs`
+Per-frame update in `Screen::render()` for animated effects:
 
-The distortion config is automatically picked up on reload because
-`config.distortion` is read every frame in the renderer (step 8). No
-explicit reload handling is needed beyond the existing config update path
-that already replaces `self.config`.
+```rust
+// frontends/rioterm/src/screen/mod.rs — render()
+
+if self.distortion_config.animated {
+    self.sugarloaf.update_distortion(
+        distortion_params_from_config(config, self.distortion_start),
+    );
+}
+```
+
+### 9. Continuous Redraw for Animation — `frontends/rioterm/src/application.rs`
+
+Animated distortion (wave) requires continuous redraws to advance the time
+uniform. The redraw scheduling chain after each `RedrawRequested` event
+must include a check for `config.distortion.animated`:
+
+```rust
+// frontends/rioterm/src/application.rs — RedrawRequested handler
+
+} else if self.config.distortion.animated {
+    // Animated distortion (e.g. wave) needs
+    // continuous redraws to update the time uniform.
+    route.schedule_redraw(
+        &mut self.scheduler,
+        route.window.screen.ctx().current_route(),
+    );
+}
+```
+
+### 10. Config Hot-Reload — `frontends/rioterm/src/screen/mod.rs`
+
+The distortion config is picked up on reload in `Screen::update_config()`,
+which stores the new `DistortionConfig` and calls
+`distortion_params_from_config()` to push updated GPU params. The
+`distortion_start` instant is preserved across reloads so animation time
+remains continuous.
 
 ## Files Changed
 
@@ -853,7 +897,8 @@ that already replaces `self.config`.
 | `sugarloaf/src/components/distortion/distortion.wgsl` | **NEW** — Full-screen triangle vertex shader + fragment shader with barrel, perspective, wave, fisheye distortion functions |
 | `sugarloaf/src/components/mod.rs` | Add `pub mod distortion` |
 | `sugarloaf/src/sugarloaf.rs` | Add `distortion_brush` field to `Sugarloaf`, add `update_distortion()` method, insert distortion pass in `render()` between overlays and filters |
-| `frontends/rioterm/src/renderer/mod.rs` | Convert `DistortionConfig` to `DistortionParams` and call `sugarloaf.update_distortion()` each frame |
+| `frontends/rioterm/src/screen/mod.rs` | Add `distortion_config` and `distortion_start` fields to `Screen`, `distortion_params_from_config()` helper using `Instant`-relative time, per-frame animation update in `render()`, config hot-reload support |
+| `frontends/rioterm/src/application.rs` | Add `distortion.animated` check to redraw scheduling chain for continuous animation redraws |
 
 ## Dependencies
 
