@@ -285,8 +285,13 @@ fn compute_quick_terminal_border_glow(
         return Vec::new();
     }
 
+    // Resolve color: use quick_terminal_color if set, else fall back to color.
+    let color_str = config
+        .quick_terminal_color
+        .as_deref()
+        .unwrap_or(&config.color);
     let color_rgb = {
-        let arr = rio_backend::config::colors::hex_to_color_arr(&config.color);
+        let arr = rio_backend::config::colors::hex_to_color_arr(color_str);
         [arr[0], arr[1], arr[2]]
     };
 

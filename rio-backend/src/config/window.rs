@@ -16,8 +16,13 @@ pub enum BorderGlowAnimate {
 pub struct BorderGlow {
     #[serde(default)]
     pub enabled: bool,
+    /// Color for the window border glow.
     #[serde(default = "default_border_glow_color")]
     pub color: String,
+    /// Override color for the quick terminal border accent.
+    /// Defaults to `color` when not set.
+    #[serde(default)]
+    pub quick_terminal_color: Option<String>,
     #[serde(default = "default_border_glow_width")]
     pub width: f32,
     #[serde(default = "default_border_glow_radius")]
@@ -55,6 +60,7 @@ impl Default for BorderGlow {
         Self {
             enabled: false,
             color: default_border_glow_color(),
+            quick_terminal_color: None,
             width: default_border_glow_width(),
             glow_radius: default_border_glow_radius(),
             glow_intensity: default_border_glow_intensity(),
