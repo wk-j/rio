@@ -78,8 +78,12 @@ const MAX_SEARCH_WHILE_TYPING: Option<usize> = Some(1000);
 const MAX_SEARCH_HISTORY_SIZE: usize = 255;
 
 /// Convert the config distortion settings into GPU-side params.
+/// `start` is the [`Instant`] recorded when the screen was created;
+/// elapsed time is computed relative to it so that `f32` precision
+/// is sufficient for smooth animation.
 fn distortion_params_from_config(
     config: &rio_backend::config::Config,
+    start: std::time::Instant,
 ) -> DistortionParams {
     use rio_backend::config::distortion::DistortionType;
     let distortion_type = match config.distortion.effect {
@@ -91,10 +95,7 @@ fn distortion_params_from_config(
     };
 
     let time = if config.distortion.animated {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f32()
+        start.elapsed().as_secs_f32()
     } else {
         0.0
     };
@@ -125,6 +126,7 @@ pub struct Screen<'screen> {
     last_ime_cursor_pos: Option<(f32, f32)>,
     hints_config: Vec<std::rc::Rc<rio_backend::config::hints::Hint>>,
     distortion_config: rio_backend::config::distortion::DistortionConfig,
+    distortion_start: std::time::Instant,
 }
 
 pub struct ScreenWindowProperties {
@@ -214,8 +216,10 @@ impl Screen<'_> {
             }
         };
 
+        let distortion_start = std::time::Instant::now();
         sugarloaf.update_filters(config.renderer.filters.as_slice());
-        sugarloaf.update_distortion(distortion_params_from_config(config));
+        sugarloaf
+            .update_distortion(distortion_params_from_config(config, distortion_start));
 
         let renderer = Renderer::new(config, font_library);
 
@@ -315,6 +319,7 @@ impl Screen<'_> {
             clipboard,
             last_ime_cursor_pos: None,
             distortion_config: config.distortion,
+            distortion_start,
         })
     }
 
@@ -422,7 +427,10 @@ impl Screen<'_> {
             .update_filters(config.renderer.filters.as_slice());
         self.distortion_config = config.distortion;
         self.sugarloaf
-            .update_distortion(distortion_params_from_config(config));
+            .update_distortion(distortion_params_from_config(
+                config,
+                self.distortion_start,
+            ));
         self.renderer = Renderer::new(config, font_library);
 
         for context_grid in self.context_manager.contexts_mut() {
@@ -3104,10 +3112,7 @@ impl Screen<'_> {
                 DT::Wave => DISTORTION_WAVE,
                 DT::Fisheye => DISTORTION_FISHEYE,
             };
-            let time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs_f32();
+            let time = self.distortion_start.elapsed().as_secs_f32();
             self.sugarloaf.update_distortion(DistortionParams {
                 distortion_type,
                 strength: d.strength,

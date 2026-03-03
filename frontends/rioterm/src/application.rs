@@ -1915,6 +1915,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         &mut self.scheduler,
                         route.window.screen.ctx().current_route(),
                     );
+                } else if self.config.distortion.animated {
+                    // Animated distortion (e.g. wave) needs
+                    // continuous redraws to update the time uniform.
+                    route.schedule_redraw(
+                        &mut self.scheduler,
+                        route.window.screen.ctx().current_route(),
+                    );
                 }
 
                 event_loop.set_control_flow(ControlFlow::Wait);
