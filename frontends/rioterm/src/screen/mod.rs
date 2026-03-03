@@ -124,6 +124,7 @@ pub struct Screen<'screen> {
     pub clipboard: Rc<RefCell<Clipboard>>,
     last_ime_cursor_pos: Option<(f32, f32)>,
     hints_config: Vec<std::rc::Rc<rio_backend::config::hints::Hint>>,
+    distortion_config: rio_backend::config::distortion::DistortionConfig,
 }
 
 pub struct ScreenWindowProperties {
@@ -313,6 +314,7 @@ impl Screen<'_> {
             bindings,
             clipboard,
             last_ime_cursor_pos: None,
+            distortion_config: config.distortion,
         })
     }
 
@@ -418,6 +420,7 @@ impl Screen<'_> {
 
         self.sugarloaf
             .update_filters(config.renderer.filters.as_slice());
+        self.distortion_config = config.distortion;
         self.sugarloaf
             .update_distortion(distortion_params_from_config(config));
         self.renderer = Renderer::new(config, font_library);
@@ -3088,6 +3091,31 @@ impl Screen<'_> {
                     .pending_update
                     .set_ui_damage(rio_backend::event::TerminalDamage::Full);
             }
+        }
+
+        // Update distortion time every frame for animated effects (wave).
+        if self.distortion_config.animated {
+            use rio_backend::config::distortion::DistortionType as DT;
+            let d = &self.distortion_config;
+            let distortion_type = match d.effect {
+                DT::None => DISTORTION_NONE,
+                DT::Barrel => DISTORTION_BARREL,
+                DT::Perspective => DISTORTION_PERSPECTIVE,
+                DT::Wave => DISTORTION_WAVE,
+                DT::Fisheye => DISTORTION_FISHEYE,
+            };
+            let time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f32();
+            self.sugarloaf.update_distortion(DistortionParams {
+                distortion_type,
+                strength: d.strength,
+                center: d.center,
+                time,
+                speed: d.speed,
+                _padding: [0.0; 2],
+            });
         }
 
         // let renderer_run_start = std::time::Instant::now();

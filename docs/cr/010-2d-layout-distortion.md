@@ -974,6 +974,8 @@ filters = ["newpixiecrt"]
 4. Vignette effect — darken edges (pairs well with barrel distortion)
 5. Chromatic aberration — RGB channel offset at edges
 
+---
+
 ## References
 
 - `sugarloaf/src/components/filters/mod.rs` — FiltersBrush pattern (texture

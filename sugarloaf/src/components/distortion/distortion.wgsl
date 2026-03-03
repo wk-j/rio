@@ -58,8 +58,6 @@ fn perspective_distort(
     k: f32,
 ) -> vec2<f32> {
     let d = uv - center;
-    // Apply stronger displacement near the top,
-    // less near the bottom
     let perspective_y = 1.0 + k * d.y;
     return vec2<f32>(
         center.x + d.x / perspective_y,
@@ -100,34 +98,22 @@ fn fisheye_distort(
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var uv = input.tex_coords;
 
-    // 1 = barrel, 2 = perspective, 3 = wave, 4 = fisheye
     switch params.distortion_type {
         case 1u: {
-            uv = barrel_distort(
-                uv, params.center, params.strength,
-            );
+            uv = barrel_distort(uv, params.center, params.strength);
         }
         case 2u: {
-            uv = perspective_distort(
-                uv, params.center, params.strength,
-            );
+            uv = perspective_distort(uv, params.center, params.strength);
         }
         case 3u: {
-            uv = wave_distort(
-                uv, params.strength, params.time,
-                params.speed,
-            );
+            uv = wave_distort(uv, params.strength, params.time, params.speed);
         }
         case 4u: {
-            uv = fisheye_distort(
-                uv, params.center, params.strength,
-            );
+            uv = fisheye_distort(uv, params.center, params.strength);
         }
         default: {}
     }
 
-    // Clamp to valid UV range; out-of-bounds samples
-    // return black (transparent)
     if uv.x < 0.0 || uv.x > 1.0
         || uv.y < 0.0 || uv.y > 1.0
     {
