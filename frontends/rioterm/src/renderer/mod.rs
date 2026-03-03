@@ -269,6 +269,109 @@ fn compute_border_glow(
     quads
 }
 
+/// Compute border glow overlay quads for the quick terminal panel.
+///
+/// Uses the same `BorderGlow` config as the window border glow but positions
+/// the edge quads around the QT panel bounds (`panel_pos`, `panel_size` in
+/// logical pixels). Edges that are flush with the window boundary (where the
+/// panel's border_radius is 0.0) are not chamfered — the glow simply runs to
+/// the corner.
+///
+/// `qt_border_radius` is the per-corner array produced by
+/// `QuickTerminalPosition::border_radius(r)`.
+fn compute_quick_terminal_border_glow(
+    config: &rio_backend::config::window::BorderGlow,
+    panel_pos: [f32; 2],
+    panel_size: [f32; 2],
+    elapsed: f32,
+) -> Vec<Quad> {
+    use rio_backend::config::window::BorderGlowAnimate;
+
+    if !config.enabled {
+        return Vec::new();
+    }
+
+    let color_rgb = {
+        let arr = rio_backend::config::colors::hex_to_color_arr(&config.color);
+        [arr[0], arr[1], arr[2]]
+    };
+
+    let alpha = match config.animate {
+        BorderGlowAnimate::None => config.glow_intensity,
+        BorderGlowAnimate::Pulse => {
+            let t = (elapsed * config.animate_speed * 2.0 * std::f32::consts::PI).sin();
+            let base = config.glow_intensity;
+            base * 0.5 + base * 0.5 * t
+        }
+        BorderGlowAnimate::Rainbow => config.glow_intensity,
+    };
+
+    let color = match config.animate {
+        BorderGlowAnimate::Rainbow => {
+            hsl_to_rgb((elapsed * config.animate_speed * 60.0) % 360.0, 0.8, 0.6)
+        }
+        _ => color_rgb,
+    };
+
+    let w = config.width;
+    let blur = config.glow_radius;
+    let shadow_color = [color[0], color[1], color[2], alpha];
+    let fill_color = [color[0], color[1], color[2], alpha * 0.8];
+
+    let px = panel_pos[0];
+    let py = panel_pos[1];
+    let pw = panel_size[0];
+    let ph = panel_size[1];
+
+    // Chamfer size matches compute_border_glow — panel-width relative, always visible.
+    let chamfer = 15.0_f32.min(pw * 0.03);
+
+    let make_edge = |pos: [f32; 2], size: [f32; 2]| -> Quad {
+        Quad {
+            position: pos,
+            size,
+            color: fill_color,
+            border_radius: [0.0; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_color,
+            shadow_offset: [0.0, 0.0],
+            shadow_blur_radius: blur,
+        }
+    };
+
+    // Only render the top edge + left edge + top-left chamfer corner.
+    // This gives a consistent L-shaped corner accent regardless of QT position,
+    // matching the style of the window border glow's top-left corner.
+    let mut quads = Vec::with_capacity(12);
+
+    // ── Top edge (from chamfer end to panel right) ──
+    let top_seg_w = pw - chamfer;
+    if top_seg_w > 0.0 {
+        quads.push(make_edge([px + chamfer, py], [top_seg_w, w]));
+    }
+
+    // ── Left edge (from chamfer end to panel bottom) ──
+    let left_seg_h = ph - chamfer;
+    if left_seg_h > 0.0 {
+        quads.push(make_edge([px, py + chamfer], [w, left_seg_h]));
+    }
+
+    // ── Top-left chamfer corner diagonal ──
+    let steps = (chamfer / w).round().max(1.0) as usize;
+    let sx = chamfer / steps as f32;
+    let sy = chamfer / steps as f32;
+    for i in 0..steps {
+        let t = i as f32;
+        quads.push(make_edge(
+            [px + chamfer - (t + 1.0) * sx, py + t * sy],
+            [sx, sy],
+        ));
+    }
+
+    quads
+}
+
 impl Renderer {
     /// Build `CustomCursorQuad` objects from config-level
     /// `CursorQuadDef` entries. Color resolution is deferred to
@@ -1877,6 +1980,30 @@ impl Renderer {
                 && self.border_glow_config.animate
                     != rio_backend::config::window::BorderGlowAnimate::None;
             sugarloaf.set_window_border_glow(border_glow_quads);
+        }
+
+        // Compute quick terminal border glow overlay (same style as window
+        // border glow, but positioned around the QT panel bounds).
+        {
+            let elapsed = self.border_glow_start.elapsed().as_secs_f32();
+            let qt_glow_quads = if self.border_glow_config.enabled {
+                if let Some((pw, ph, pos)) = context_manager
+                    .current_grid()
+                    .quick_terminal_glow_geometry()
+                {
+                    compute_quick_terminal_border_glow(
+                        &self.border_glow_config,
+                        pos,
+                        [pw, ph],
+                        elapsed,
+                    )
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+            sugarloaf.set_quick_terminal_border_glow(qt_glow_quads);
         }
 
         // Set progress bar from active terminal's progress state

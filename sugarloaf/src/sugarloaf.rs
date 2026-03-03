@@ -474,7 +474,11 @@ impl Sugarloaf<'_> {
                     // Cursor glow layers (renders first / lowest)
                     overlay_quads.extend_from_slice(&self.state.cursor_glow_layers);
 
-                    // Window border glow (above cursor glow, below vi mode)
+                    // Quick terminal border glow (above cursor glow, below window border glow)
+                    overlay_quads
+                        .extend_from_slice(&self.state.quick_terminal_border_glow);
+
+                    // Window border glow (above QT glow, below vi mode)
                     overlay_quads.extend_from_slice(&self.state.window_border_glow);
 
                     // Vi mode background tint
@@ -580,6 +584,11 @@ impl Sugarloaf<'_> {
     #[inline]
     pub fn set_window_border_glow(&mut self, quads: Vec<Quad>) {
         self.state.set_window_border_glow(quads);
+    }
+
+    #[inline]
+    pub fn set_quick_terminal_border_glow(&mut self, quads: Vec<Quad>) {
+        self.state.set_quick_terminal_border_glow(quads);
     }
 
     /// Set the custom cursor quad definitions for this frame.

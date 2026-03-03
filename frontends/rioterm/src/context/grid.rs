@@ -330,10 +330,29 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         self.quick_terminal.as_ref().is_some_and(|qt| qt.visible)
     }
 
+    /// If the quick terminal is visible, returns its panel geometry needed
+    /// for the border glow overlay: `Some((panel_w, panel_h, [pos_x, pos_y]))`.
+    ///
+    /// Uses the same position and dimension values as `extend_with_objects`
+    /// so the glow quads align exactly with the rendered background quad.
+    pub fn quick_terminal_glow_geometry(&self) -> Option<(f32, f32, [f32; 2])> {
+        let qt = self.quick_terminal.as_ref()?;
+        if !qt.visible {
+            return None;
+        }
+        // Mirror exactly what extend_with_objects does for the background quad
+        let dim = &qt.item.val.dimension;
+        let scale = dim.dimension.scale;
+        let pos = qt.item.position();
+        let panel_w = dim.width / scale;
+        let panel_h = dim.height / scale;
+        Some((panel_w, panel_h, pos))
+    }
+
     /// Compute the panel width, height, and position for the quick terminal
     /// based on the configured position (top/bottom/left/right/center).
     /// Returns `(panel_width, panel_height, [pos_x, pos_y])`.
-    fn qt_panel_geometry(&self, scale: f32) -> (f32, f32, [f32; 2]) {
+    pub fn qt_panel_geometry(&self, scale: f32) -> (f32, f32, [f32; 2]) {
         let cfg = &self.quick_terminal_config;
         let h_frac = cfg.height.clamp(0.1, 0.9);
         let w_frac = cfg.width.clamp(0.1, 0.9);

@@ -28,6 +28,9 @@ pub struct SugarState {
     pub cursor_glow_layers: Vec<Quad>,
     /// Window border glow overlay (Opera GX style glowing edges).
     pub window_border_glow: Vec<Quad>,
+    /// Quick terminal border glow overlay (same style as window_border_glow,
+    /// but positioned around the QT panel bounds).
+    pub quick_terminal_border_glow: Vec<Quad>,
 }
 
 impl SugarState {
@@ -53,6 +56,7 @@ impl SugarState {
             progress_bar: None,
             cursor_glow_layers: vec![],
             window_border_glow: vec![],
+            quick_terminal_border_glow: vec![],
         }
     }
 
@@ -320,5 +324,10 @@ impl SugarState {
     #[inline]
     pub fn set_window_border_glow(&mut self, quads: Vec<Quad>) {
         self.window_border_glow = quads;
+    }
+
+    #[inline]
+    pub fn set_quick_terminal_border_glow(&mut self, quads: Vec<Quad>) {
+        self.quick_terminal_border_glow = quads;
     }
 }
