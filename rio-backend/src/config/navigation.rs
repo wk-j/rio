@@ -92,6 +92,16 @@ fn default_bookmark_shadow_offset() -> [f32; 2] {
     [0.0, 1.0]
 }
 
+#[inline]
+fn default_bookmark_active_glow_blur_radius() -> f32 {
+    0.0
+}
+
+#[inline]
+fn default_bookmark_active_cutline_width() -> f32 {
+    0.0
+}
+
 /// Style configuration for bookmark-mode tab indicators.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BookmarkStyle {
@@ -153,6 +163,34 @@ pub struct BookmarkStyle {
     #[serde(default = "default_bookmark_shadow_offset", rename = "shadow-offset")]
     pub shadow_offset: [f32; 2],
 
+    /// Blur radius of the active-tab edge glow halo (default: 0.0 = off).
+    /// When > 0, an extra quad is rendered behind the active pill with an
+    /// omnidirectional SDF shadow, creating a deep glowing edge highlight.
+    #[serde(
+        default = "default_bookmark_active_glow_blur_radius",
+        rename = "active-glow-blur-radius"
+    )]
+    pub active_glow_blur_radius: f32,
+
+    /// Color of the active-tab edge glow halo (default: same as pill color).
+    /// Ignored when active_glow_blur_radius == 0.
+    #[serde(
+        deserialize_with = "deserialize_to_arr",
+        default = "default_bookmark_active_glow_color",
+        rename = "active-glow-color"
+    )]
+    pub active_glow_color: ColorArray,
+
+    /// Width of the full-height vertical cutline rendered flush against the
+    /// right window edge when a tab is active (default: 0.0 = off).
+    /// The line uses the active tab's pill color and an optional glow, matching
+    /// the window border glow aesthetic.
+    #[serde(
+        default = "default_bookmark_active_cutline_width",
+        rename = "active-cutline-width"
+    )]
+    pub active_cutline_width: f32,
+
     /// Enable per-tab hue rotation colors (default: false)
     #[serde(
         default = "default_bookmark_hue_rotation_enabled",
@@ -197,6 +235,12 @@ fn default_bookmark_shadow_color() -> ColorArray {
     [0.0, 0.0, 0.0, 0.4]
 }
 
+#[inline]
+fn default_bookmark_active_glow_color() -> ColorArray {
+    // Transparent — renderer falls back to the pill color when this is [0,0,0,0]
+    [0.0, 0.0, 0.0, 0.0]
+}
+
 impl Default for BookmarkStyle {
     fn default() -> Self {
         BookmarkStyle {
@@ -211,6 +255,9 @@ impl Default for BookmarkStyle {
             shadow_blur_radius: default_bookmark_shadow_blur_radius(),
             shadow_color: default_bookmark_shadow_color(),
             shadow_offset: default_bookmark_shadow_offset(),
+            active_glow_blur_radius: default_bookmark_active_glow_blur_radius(),
+            active_glow_color: default_bookmark_active_glow_color(),
+            active_cutline_width: default_bookmark_active_cutline_width(),
             hue_rotation: default_bookmark_hue_rotation_enabled(),
             base_hue: default_bookmark_base_hue(),
             hue_step: default_bookmark_hue_step(),

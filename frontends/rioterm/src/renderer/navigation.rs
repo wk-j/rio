@@ -110,12 +110,59 @@ impl ScreenNavigation {
             return;
         }
 
-        let (width, _, scale) = dimensions;
+        let (width, height, scale) = dimensions;
         let style = &self.navigation.bookmark_style;
 
         let mut initial_position = (width / scale) - style.padding_x;
         let position_modifier = style.spacing;
         let radius = style.border_radius;
+
+        // Determine the active tab's color up-front so we can use it for the
+        // cutline before entering the per-pill loop.
+        let active_color = if !qt_visible {
+            let hue = style.base_hue + (current as f32) * style.hue_step;
+            if style.hue_rotation {
+                hsl_to_rgba(hue, style.saturation, style.lightness_active, 1.0)
+            } else {
+                colors.tabs_active_highlight
+            }
+        } else {
+            [0.0, 0.0, 0.0, 0.0]
+        };
+
+        // Vertical cutline: a thin full-height line flush with the right window
+        // edge, rendered in the active tab's color, optionally with a glow.
+        if !qt_visible && style.active_cutline_width > 0.0 {
+            let line_w = style.active_cutline_width;
+            let win_w = width / scale;
+            let win_h = height / scale;
+            // Glow layer behind the line (reuses active_glow_blur_radius)
+            if style.active_glow_blur_radius > 0.0 {
+                let glow_color = if style.active_glow_color[3] > 0.0 {
+                    style.active_glow_color
+                } else {
+                    [active_color[0], active_color[1], active_color[2], 1.0]
+                };
+                objects.push(Object::Quad(Quad {
+                    position: [win_w - line_w, 0.0],
+                    color: [0.0, 0.0, 0.0, 0.0],
+                    size: [line_w, win_h],
+                    border_radius: [0.0, 0.0, 0.0, 0.0],
+                    border_width: 0.0,
+                    border_color: [0.0, 0.0, 0.0, 0.0],
+                    shadow_color: glow_color,
+                    shadow_offset: [0.0, 0.0],
+                    shadow_blur_radius: style.active_glow_blur_radius,
+                }));
+            }
+            // The cutline itself
+            objects.push(Object::Quad(Quad {
+                position: [win_w - line_w, 0.0],
+                color: active_color,
+                size: [line_w, win_h],
+                ..Quad::default()
+            }));
+        }
 
         for i in (0..len).rev() {
             // When quick terminal is active, no tab appears "active"
@@ -153,6 +200,29 @@ impl ScreenNavigation {
                         }
                     }
                 }
+            }
+
+            // Active-tab edge glow: push a larger quad behind the pill whose
+            // SDF shadow radiates outward, creating a deep highlight halo.
+            if is_active && style.active_glow_blur_radius > 0.0 {
+                let blur = style.active_glow_blur_radius;
+                let glow_color = if style.active_glow_color[3] > 0.0 {
+                    style.active_glow_color
+                } else {
+                    // Fall back to the pill color with full opacity
+                    [color[0], color[1], color[2], 1.0]
+                };
+                objects.push(Object::Quad(Quad {
+                    position: [initial_position, 0.0],
+                    color: [0.0, 0.0, 0.0, 0.0],
+                    size: [style.width, height],
+                    border_radius: [radius, radius, radius, radius],
+                    border_width: 0.0,
+                    border_color: [0.0, 0.0, 0.0, 0.0],
+                    shadow_color: glow_color,
+                    shadow_offset: [0.0, 0.0],
+                    shadow_blur_radius: blur,
+                }));
             }
 
             let renderable = Quad {
