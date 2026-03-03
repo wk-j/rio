@@ -1099,14 +1099,15 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
             let cursor = current.cursor_from_ref();
             let current_dim = current.dimension;
 
-            // Build dimension with a small internal margin so text
-            // doesn't touch the panel border, but no window-level
-            // padding that would create a visible gap.
+            // Build dimension with an internal margin so text doesn't
+            // overlap the panel border glow. 10 logical pixels gives
+            // clear breathing room regardless of glow-radius setting.
             let scale = current_dim.dimension.scale;
+            let qt_padding = 10.0_f32;
             let qt_margin = Delta {
-                x: grid.scaled_padding() / scale,
-                top_y: grid.scaled_padding() / scale,
-                bottom_y: grid.scaled_padding() / scale,
+                x: qt_padding,
+                top_y: qt_padding,
+                bottom_y: qt_padding,
             };
             let margin_x = qt_margin.x * scale;
             let margin_y = (qt_margin.top_y + qt_margin.bottom_y) * scale;

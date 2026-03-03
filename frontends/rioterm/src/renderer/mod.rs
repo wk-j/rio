@@ -271,14 +271,8 @@ fn compute_border_glow(
 
 /// Compute border glow overlay quads for the quick terminal panel.
 ///
-/// Uses the same `BorderGlow` config as the window border glow but positions
-/// the edge quads around the QT panel bounds (`panel_pos`, `panel_size` in
-/// logical pixels). Edges that are flush with the window boundary (where the
-/// panel's border_radius is 0.0) are not chamfered — the glow simply runs to
-/// the corner.
-///
-/// `qt_border_radius` is the per-corner array produced by
-/// `QuickTerminalPosition::border_radius(r)`.
+/// Renders a top+left L-shaped corner accent with a chamfered diagonal cut,
+/// using the same `BorderGlow` config as the window border glow.
 fn compute_quick_terminal_border_glow(
     config: &rio_backend::config::window::BorderGlow,
     panel_pos: [f32; 2],

@@ -97,6 +97,9 @@ pub struct QuickTerminalState<T: EventListener> {
     pub visible: bool,
     /// The key of the pane that was focused before the quick terminal was shown
     pub saved_focus: usize,
+    /// Raw panel origin (top-left corner of the background quad) in logical pixels.
+    /// Separate from `item.position()` which is offset by the internal padding.
+    pub panel_pos: [f32; 2],
 }
 
 /// Fractional position and size for a command overlay within the window.
@@ -340,13 +343,12 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         if !qt.visible {
             return None;
         }
-        // Mirror exactly what extend_with_objects does for the background quad
+        // Use panel_pos (raw panel origin) so glow aligns with background quad
         let dim = &qt.item.val.dimension;
         let scale = dim.dimension.scale;
-        let pos = qt.item.position();
         let panel_w = dim.width / scale;
         let panel_h = dim.height / scale;
-        Some((panel_w, panel_h, pos))
+        Some((panel_w, panel_h, qt.panel_pos))
     }
 
     /// Compute the panel width, height, and position for the quick terminal
@@ -414,7 +416,11 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         let (panel_w, panel_h, pos) = self.qt_panel_geometry(scale);
         item.val.dimension.update_width(panel_w);
         item.val.dimension.update_height(panel_h);
-        item.set_position(pos);
+        // Offset the rich text render position by the internal padding margin
+        // so text doesn't overlap the border glow.
+        let margin = &item.val.dimension.margin;
+        let text_pos = [pos[0] + margin.x, pos[1] + margin.top_y];
+        item.set_position(text_pos);
 
         // Resize PTY to match the overlay dimensions
         let mut terminal = item.val.terminal.lock();
@@ -430,6 +436,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             item,
             visible: true,
             saved_focus,
+            panel_pos: pos,
         });
     }
 
@@ -520,7 +527,10 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 }
                 _ => unreachable!(),
             };
-            qt.item.set_position(pos);
+            let margin = &qt.item.val.dimension.margin;
+            qt.item
+                .set_position([pos[0] + margin.x, pos[1] + margin.top_y]);
+            qt.panel_pos = pos;
         } else {
             // Resize horizontally (width) for left/right
             let margin_x = self.margin.x * scale;
@@ -542,7 +552,10 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 }
                 _ => unreachable!(),
             };
-            qt.item.set_position(pos);
+            let margin = &qt.item.val.dimension.margin;
+            qt.item
+                .set_position([pos[0] + margin.x, pos[1] + margin.top_y]);
+            qt.panel_pos = pos;
         }
 
         // Resize PTY to match new panel size
@@ -965,7 +978,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                 let cfg = &self.quick_terminal_config;
                 let dim = &qt.item.val.dimension;
                 let scale = dim.dimension.scale;
-                let pos = qt.item.position();
+                let pos = qt.panel_pos;
 
                 let panel_w = dim.width / scale;
                 let panel_h = dim.height / scale;
@@ -980,23 +993,11 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
                     c
                 };
 
-                let bc = if cfg.has_custom_border_color() {
-                    cfg.border_color
-                } else {
-                    self.border_color
-                };
-
-                let border_radius = cfg.position.border_radius(cfg.border_radius);
                 target.push(Object::Quad(Quad {
                     position: pos,
                     color: bg,
                     size: [panel_w, panel_h],
-                    border_radius,
-                    border_color: bc,
-                    border_width: cfg.border_width,
-                    shadow_color: cfg.shadow_color,
-                    shadow_offset: cfg.shadow_offset,
-                    shadow_blur_radius: cfg.shadow_blur_radius,
+                    ..Quad::default()
                 }));
 
                 target.push(qt.item.rich_text_object.clone());
@@ -1097,13 +1098,14 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
     pub fn current_context_with_computed_dimension(&self) -> (&Context<T>, Delta<f32>) {
         let len = self.inner.len();
 
-        // When quick terminal is focused, return its context and position
+        // When quick terminal is focused, return its context and position.
+        // item.position() already includes the internal padding offset.
         if let Some(ref qt) = self.quick_terminal {
             if qt.visible && qt.item.val.route_id == self.current {
-                let pos = qt.item.position();
+                let text_pos = qt.item.position();
                 let margin = Delta {
-                    x: pos[0] + self.scaled_padding,
-                    top_y: pos[1] + self.scaled_padding,
+                    x: text_pos[0],
+                    top_y: text_pos[1],
                     bottom_y: qt.item.val.dimension.margin.bottom_y,
                 };
                 return (&qt.item.val, margin);

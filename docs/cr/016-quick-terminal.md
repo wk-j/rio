@@ -93,9 +93,8 @@ position, and geometry are fully configurable.
 +--------------------------------------------------+
 ```
 
-Corners that touch a window edge are sharp; interior corners are rounded.
-The panel has a configurable border and drop shadow. Main pane content is
-rendered normally around it.
+The panel has an internal padding margin so terminal content does not overlap
+the border glow accent. Main pane content is rendered normally around it.
 
 ## Architecture
 
@@ -112,6 +111,9 @@ pub struct QuickTerminalState<T: EventListener> {
     pub visible: bool,
     /// The route_id of the pane that was focused before the QT was shown
     pub saved_focus: usize,
+    /// Raw panel origin (top-left corner of the background quad) in logical pixels.
+    /// Separate from `item.position()` which is offset by the internal padding margin.
+    pub panel_pos: [f32; 2],
 }
 ```
 
@@ -159,18 +161,27 @@ All geometry is computed by `ContextGrid::qt_panel_geometry()`:
 Minimum panel size is 60 scaled pixels on the relevant axis.
 Main pane dimensions are never modified — the panel is a pure visual overlay.
 
-### Border Radius Per Position
+### Border Glow Accent
 
-`QuickTerminalPosition::border_radius(r)` returns the corner radii array,
-rounding only the corners that do not touch a window edge:
+When `[window.border-glow]` is enabled, the quick terminal renders a
+top-left L-shaped corner accent in the same style as the window border glow —
+a thin edge quad with shadow blur creating the glow effect, plus a chamfered
+diagonal cut at the top-left corner. The accent is computed by
+`compute_quick_terminal_border_glow()` in `renderer/mod.rs` and placed in
+the `quick_terminal_border_glow` overlay slot in `SugarState`, rendered
+between the cursor glow and window border glow overlay passes.
 
-| Position | top-left | top-right | bottom-right | bottom-left |
-|----------|----------|-----------|--------------|-------------|
-| `bottom` | r | r | 0 | 0 |
-| `top` | 0 | 0 | r | r |
-| `left` | 0 | r | r | 0 |
-| `right` | r | 0 | 0 | r |
-| `center` | r | r | r | r |
+The glow reuses `[window.border-glow]` config entirely — no additional
+`[quick-terminal]` config keys are needed.
+
+### Internal Padding
+
+The QT context is created with a 10 logical-pixel margin on all sides
+(`x`, `top_y`, `bottom_y`). This margin offsets `item.set_position()` so
+terminal content is inset from the panel edge and does not overlap the
+border glow. The raw panel origin is stored separately as `panel_pos` on
+`QuickTerminalState` so the background quad and glow quads still align with
+the true panel boundary.
 
 ### Resize
 
@@ -209,8 +220,8 @@ is always rendered with `TerminalDamage::Full` and
 `bg_opacity_override = Some(config.opacity)` so default-background cells are
 opaque and fully cover whatever is underneath.
 
-Panel background quad uses position-dependent border radii — corners touching
-a window edge are sharp, interior corners are rounded (see table above).
+The panel background quad is a plain `Quad` with no border or shadow —
+visual styling is handled entirely by the border glow overlay pass.
 
 ### Dismissal Sites
 
@@ -249,6 +260,9 @@ keys = [
 
 ### `[quick-terminal]` section
 
+Border and shadow styling is handled by `[window.border-glow]` — the quick
+terminal reuses those settings with no additional appearance config.
+
 ```toml
 [quick-terminal]
 # Panel position: "top", "bottom", "left", "right", or "center". Default: "bottom"
@@ -266,26 +280,21 @@ width = 0.4
 # Background opacity (0.0 = transparent, 1.0 = opaque). Default: 1.0
 opacity = 1.0
 
-# Top corner rounding in scaled pixels (0.0 = sharp). Default: 6.0
-border-radius = 6.0
-
-# Border thickness in scaled pixels (0.0 = no border). Default: 1.0
-border-width = 1.0
-
-# Border color. Default: transparent (uses terminal split color).
-border-color = '#44475a'
-
 # Background color. Default: transparent (uses terminal background).
 background-color = '#1e1e2e'
+```
 
-# Drop shadow blur radius (0.0 = no shadow). Default: 16.0
-shadow-blur-radius = 16.0
+Border glow appearance is configured under `[window.border-glow]`:
 
-# Drop shadow color. Default: '#00000066'.
-shadow-color = '#00000066'
-
-# Drop shadow offset [x, y]. Default: [0.0, -4.0]
-shadow-offset = [0.0, -4.0]
+```toml
+[window.border-glow]
+enabled = true
+color = "#8B5CF6"
+width = 2.0
+glow-radius = 8.0
+glow-intensity = 0.6
+animate = "none"   # "none", "pulse", "rainbow"
+animate-speed = 1.0
 ```
 
 CWD inheritance is controlled by the global `cwd` flag:
@@ -302,14 +311,16 @@ without restarting.
 
 | File | Changes |
 |------|---------|
-| `rio-backend/src/config/quick_terminal.rs` | `QuickTerminalPosition` enum (Top/Bottom/Left/Right/Center) with `border_radius()` / `is_horizontal()` / `is_vertical()` helpers; `QuickTerminalConfig` struct with `position` and `width` fields plus all panel appearance fields and defaults |
+| `rio-backend/src/config/quick_terminal.rs` | `QuickTerminalPosition` enum with `is_horizontal()` / `is_vertical()` helpers; `QuickTerminalConfig` with `position`, `height`, `width`, `opacity`, `background-color` only — border/shadow/radius fields removed (styling via `[window.border-glow]`) |
 | `rio-backend/src/config/mod.rs` | Register `pub mod quick_terminal`, import type, add `quick_terminal` field to `Config` and `Config::default()` |
-| `frontends/rioterm/src/context/grid.rs` | `QuickTerminalState<T>`, `ContextGrid::quick_terminal_config` field, `qt_panel_geometry()` helper for position-aware sizing/anchoring, `open_quick_terminal()` / `toggle_quick_terminal()` use geometry helper, `resize_quick_terminal()` supports vertical resize (top/bottom/center) and horizontal resize (left/right), position-aware `border_radius` in `extend_with_objects()`, no main-pane line clipping (QT opaque backgrounds cover overlapping content, matching CR-009), focus routing, dismiss on resize |
-| `frontends/rioterm/src/context/mod.rs` | `quick_terminal` field on `ContextManagerConfig`, pass through all `ContextGrid::new()` call sites (×3), `toggle_quick_terminal()`, `dismiss_quick_terminal()`, PTY exit handling |
-| `frontends/rioterm/src/renderer/mod.rs` | Main panes render all lines (no clipping), `qt_opacity` from config used as `bg_opacity_override` so QT cell backgrounds are opaque and cover main-pane content, QT content render block |
+| `frontends/rioterm/src/context/grid.rs` | `QuickTerminalState<T>` with `panel_pos` field (raw panel origin separate from text-offset `item.position()`); `qt_panel_geometry()` for position-aware sizing; `open_quick_terminal()` sets text position offset by 10px internal padding; `resize_quick_terminal()` keeps `panel_pos` in sync; `extend_with_objects()` uses `panel_pos` for background quad; `quick_terminal_glow_geometry()` exposes panel bounds for glow overlay |
+| `frontends/rioterm/src/context/mod.rs` | `toggle_quick_terminal()` creates QT with 10px internal margin on all sides; `current_context_with_computed_dimension()` uses stored text position directly |
+| `frontends/rioterm/src/renderer/mod.rs` | `compute_quick_terminal_border_glow()` — L-shaped top+left chamfered corner accent reusing `BorderGlow` config; called each frame when QT is visible and border-glow is enabled |
+| `sugarloaf/src/sugarloaf/state.rs` | `quick_terminal_border_glow: Vec<Quad>` overlay field + setter |
+| `sugarloaf/src/sugarloaf.rs` | `set_quick_terminal_border_glow()` API; QT glow inserted in overlay pass between cursor glow and window border glow |
 | `frontends/rioterm/src/renderer/navigation.rs` | Tab bar active-tab suppression when `qt_visible` |
-| `frontends/rioterm/src/screen/mod.rs` | `ToggleQuickTerminal` dispatch (×2), `MoveDivider{Up,Down}` intercept for horizontal QT, `MoveDivider{Left,Right}` intercept for vertical QT, initial config wiring, hot-reload sync |
-| `frontends/rioterm/src/bindings/mod.rs` | `Action::ToggleQuickTerminal` variant, `"togglequickterminal"` config string parser |
+| `frontends/rioterm/src/screen/mod.rs` | `ToggleQuickTerminal` dispatch, `MoveDivider` intercepts, config wiring and hot-reload sync |
+| `frontends/rioterm/src/bindings/mod.rs` | `Action::ToggleQuickTerminal` variant |
 
 ## Dependencies
 
@@ -318,7 +329,10 @@ without restarting.
   renders all quads then all rich texts in one pass. The overlay's opaque cell
   backgrounds cover main-pane content in the overlapping region. No main-pane
   line clipping is used.
-- Sugarloaf `Quad` primitive (border, shadow, rounded corners)
+- CR-015 (Window Border Glow) — the QT border accent reuses `BorderGlow` config
+  and the same `compute_border_glow` quad/shadow approach, rendered in the
+  overlay pass via the `quick_terminal_border_glow` slot in `SugarState`.
+- Sugarloaf `Quad` primitive
 
 ## References
 
