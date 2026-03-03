@@ -171,8 +171,10 @@ diagonal cut at the top-left corner. The accent is computed by
 the `quick_terminal_border_glow` overlay slot in `SugarState`, rendered
 between the cursor glow and window border glow overlay passes.
 
-The glow reuses `[window.border-glow]` config entirely — no additional
-`[quick-terminal]` config keys are needed.
+The glow reuses `[window.border-glow]` config with one optional override:
+`quick-terminal-color` sets a separate accent color for the QT border only
+(e.g. a different hue from the window glow). When not set, it falls back to
+the shared `color` field.
 
 ### Internal Padding
 
@@ -290,6 +292,9 @@ Border glow appearance is configured under `[window.border-glow]`:
 [window.border-glow]
 enabled = true
 color = "#8B5CF6"
+# Optional: separate accent color for the quick terminal border only.
+# Omit to inherit `color`.
+quick-terminal-color = "#06B6D4"
 width = 2.0
 glow-radius = 8.0
 glow-intensity = 0.6
