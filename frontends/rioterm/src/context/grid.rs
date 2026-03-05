@@ -158,6 +158,9 @@ pub struct ContextGrid<T: EventListener> {
     pub command_overlays: Vec<CommandOverlayState<T>>,
     /// Appearance config for command overlay panels
     pub command_overlay_style: rio_backend::config::command_overlay::CommandOverlayStyle,
+    /// Whether color preview overlay is active (renders colored quads
+    /// on top of detected hex color codes in visible terminal content)
+    pub color_preview_active: bool,
 }
 
 pub struct ContextGridItem<T: EventListener> {
@@ -244,6 +247,7 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
             quick_terminal_config,
             command_overlays: Vec::new(),
             command_overlay_style,
+            color_preview_active: false,
         };
         grid.calculate_positions_for_affected_nodes(&[root_key]);
         grid
@@ -625,6 +629,11 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         } else {
             true // caller must create a new context
         }
+    }
+
+    /// Toggle the color preview overlay on/off.
+    pub fn toggle_color_preview(&mut self) {
+        self.color_preview_active = !self.color_preview_active;
     }
 
     /// Dismiss (remove) a command overlay by its context's route_id.

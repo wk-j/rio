@@ -276,6 +276,7 @@ impl From<String> for Action {
             "togglevimode" => Some(Action::ToggleViMode),
             "togglefullscreen" => Some(Action::ToggleFullscreen),
             "toggleleadermenu" => Some(Action::ToggleLeaderMenu),
+            "colorpreview" => Some(Action::ToggleColorPreview),
             "none" => Some(Action::None),
             _ => None,
         };
@@ -541,6 +542,10 @@ pub enum Action {
     /// Toggle a command output overlay (floating, click-through PTY panel).
     /// The String is the command to run (e.g., "top", "htop", "git log --oneline").
     ToggleCommandOverlay(String),
+
+    /// Toggle color preview overlay — renders colored quads on top of
+    /// detected hex color codes in the visible terminal content.
+    ToggleColorPreview,
 
     /// Cycle focus to next window (auto-align)
     CycleWindowNext,

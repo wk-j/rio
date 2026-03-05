@@ -224,6 +224,14 @@ fn default_leader_items() -> Vec<LeaderItem> {
             exec: None,
             overlay: None,
         },
+        LeaderItem {
+            key: 'p',
+            label: "Color preview".to_string(),
+            action: Some("ColorPreview".to_string()),
+            write: None,
+            exec: None,
+            overlay: None,
+        },
     ]
 }
 

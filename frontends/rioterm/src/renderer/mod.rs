@@ -33,6 +33,7 @@ use rio_backend::sugarloaf::{
 };
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::ops::RangeInclusive;
+use std::sync::LazyLock;
 
 use unicode_width::UnicodeWidthChar;
 
@@ -59,6 +60,110 @@ struct TrailEntry {
     cursor_shape: CursorShape,
     /// When the cursor arrived at this position.
     timestamp: std::time::Instant,
+}
+
+// --- Hex color preview helpers ---
+
+static HEX_COLOR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    // Longest alternatives first so the engine prefers 8/6-digit
+    // over 3-digit. The 3-digit branch uses a word boundary (\b)
+    // instead of a look-ahead (which the regex crate doesn't support)
+    // to avoid matching inside longer hex strings.
+    regex::Regex::new(
+        r"(?:#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|0x[0-9a-fA-F]{8}\b|0x[0-9a-fA-F]{6}\b)",
+    )
+    .unwrap()
+});
+
+struct DetectedColor {
+    row: usize,
+    col_start: usize,
+    col_end: usize,
+    color: ColorArray,
+}
+
+fn parse_hex_to_color(s: &str) -> Option<ColorArray> {
+    let hex = if let Some(stripped) = s.strip_prefix("0x") {
+        stripped
+    } else if let Some(stripped) = s.strip_prefix('#') {
+        stripped
+    } else {
+        return None;
+    };
+
+    match hex.len() {
+        3 => {
+            let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
+            let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
+            let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()?;
+            Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0])
+        }
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0])
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+            Some([
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                a as f32 / 255.0,
+            ])
+        }
+        _ => None,
+    }
+}
+
+fn contrast_border_color(color: &ColorArray) -> ColorArray {
+    let lum = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
+    if lum > 0.5 {
+        [0.2, 0.2, 0.2, 0.8]
+    } else {
+        [0.9, 0.9, 0.9, 0.5]
+    }
+}
+
+fn detect_hex_colors(visible_rows: &[Row<Square>], columns: usize) -> Vec<DetectedColor> {
+    let mut results = Vec::new();
+
+    for (row_idx, row) in visible_rows.iter().enumerate() {
+        let mut text = String::with_capacity(columns);
+        let mut col_map: Vec<usize> = Vec::with_capacity(columns);
+
+        for col in 0..columns.min(row.len()) {
+            let square = &row.inner[col];
+            if square.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                continue;
+            }
+            col_map.push(col);
+            text.push(square.c);
+        }
+
+        for m in HEX_COLOR_RE.find_iter(&text) {
+            let hex_str = m.as_str();
+            if let Some(color) = parse_hex_to_color(hex_str) {
+                let byte_start = m.start();
+                let byte_end = m.end();
+                if byte_start < col_map.len() && byte_end - 1 < col_map.len() {
+                    let start_col = col_map[byte_start];
+                    let end_col = col_map[byte_end - 1] + 1;
+                    results.push(DetectedColor {
+                        row: row_idx,
+                        col_start: start_col,
+                        col_end: end_col,
+                        color,
+                    });
+                }
+            }
+        }
+    }
+    results
 }
 
 pub struct Renderer {
@@ -1777,6 +1882,56 @@ impl Renderer {
             None
         };
         sugarloaf.set_vi_mode_overlay(vi_mode_overlay);
+
+        // Color preview: scan visible terminal content for hex
+        // color codes and render colored quads covering each one.
+        {
+            let grid = context_manager.current_grid();
+            if grid.color_preview_active {
+                let mut color_quads: Vec<Quad> = Vec::new();
+
+                for grid_context in grid.contexts_ordered() {
+                    let pane_pos = grid_context.position();
+                    let dim = &grid_context.val.dimension;
+                    let scale = dim.dimension.scale;
+                    let cell_w = dim.dimension.width / scale;
+                    let cell_h = (dim.dimension.height / scale) * dim.line_height;
+                    let columns = dim.columns;
+
+                    let visible_rows = {
+                        let terminal = grid_context.val.terminal.lock();
+                        terminal.visible_rows()
+                    };
+
+                    let detected = detect_hex_colors(&visible_rows, columns);
+
+                    for dc in &detected {
+                        let quad_x = pane_pos[0] + (dc.col_start as f32) * cell_w;
+                        let quad_y = pane_pos[1] + (dc.row as f32) * cell_h;
+                        let char_count = (dc.col_end - dc.col_start) as f32;
+                        let quad_w = char_count * cell_w;
+                        let quad_h = cell_h;
+                        let border = contrast_border_color(&dc.color);
+
+                        color_quads.push(Quad {
+                            position: [quad_x, quad_y],
+                            size: [quad_w, quad_h],
+                            color: dc.color,
+                            border_radius: [2.0; 4],
+                            border_color: border,
+                            border_width: 1.0,
+                            shadow_color: [0.0; 4],
+                            shadow_offset: [0.0; 2],
+                            shadow_blur_radius: 0.0,
+                        });
+                    }
+                }
+
+                sugarloaf.set_color_preview_overlay(color_quads);
+            } else {
+                sugarloaf.set_color_preview_overlay(Vec::new());
+            }
+        }
 
         // Build cursor glow layers: concentric quads that create
         // a bloom effect behind the cursor cell. Shape adapts to

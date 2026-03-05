@@ -964,6 +964,10 @@ impl Screen<'_> {
                     overlay_dims,
                 );
             }
+            Act::ToggleColorPreview => {
+                let grid = self.context_manager.current_grid_mut();
+                grid.toggle_color_preview();
+            }
             Act::IncreaseFontSize => {
                 self.change_font_size(FontSizeAction::Increase);
             }
@@ -1434,6 +1438,11 @@ impl Screen<'_> {
                             command,
                             overlay_dims,
                         );
+                        self.render();
+                    }
+                    Act::ToggleColorPreview => {
+                        let grid = self.context_manager.current_grid_mut();
+                        grid.toggle_color_preview();
                         self.render();
                     }
                     Act::ConfigEditor => {

@@ -496,6 +496,9 @@ impl Sugarloaf<'_> {
                         overlay_quads.push(progress_bar);
                     }
 
+                    // Color preview (hex code covering quads)
+                    overlay_quads.extend_from_slice(&self.state.color_preview_quads);
+
                     if !overlay_quads.is_empty() {
                         let mut overlay_pass =
                             encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -589,6 +592,11 @@ impl Sugarloaf<'_> {
     #[inline]
     pub fn set_quick_terminal_border_glow(&mut self, quads: Vec<Quad>) {
         self.state.set_quick_terminal_border_glow(quads);
+    }
+
+    #[inline]
+    pub fn set_color_preview_overlay(&mut self, quads: Vec<Quad>) {
+        self.state.set_color_preview_overlay(quads);
     }
 
     /// Set the custom cursor quad definitions for this frame.

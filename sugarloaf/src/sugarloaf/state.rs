@@ -31,6 +31,9 @@ pub struct SugarState {
     /// Quick terminal border glow overlay (same style as window_border_glow,
     /// but positioned around the QT panel bounds).
     pub quick_terminal_border_glow: Vec<Quad>,
+    /// Color preview overlay: colored quads covering detected hex
+    /// color codes in visible terminal content.
+    pub color_preview_quads: Vec<Quad>,
 }
 
 impl SugarState {
@@ -57,6 +60,7 @@ impl SugarState {
             cursor_glow_layers: vec![],
             window_border_glow: vec![],
             quick_terminal_border_glow: vec![],
+            color_preview_quads: vec![],
         }
     }
 
@@ -329,5 +333,10 @@ impl SugarState {
     #[inline]
     pub fn set_quick_terminal_border_glow(&mut self, quads: Vec<Quad>) {
         self.quick_terminal_border_glow = quads;
+    }
+
+    #[inline]
+    pub fn set_color_preview_overlay(&mut self, quads: Vec<Quad>) {
+        self.color_preview_quads = quads;
     }
 }
